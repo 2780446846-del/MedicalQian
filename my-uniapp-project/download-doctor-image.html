@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>下载医生图片</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .image-preview {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .image-preview img {
+            max-width: 100%;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        .download-btn {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        .download-btn:hover {
+            background: #357abd;
+        }
+        .instructions {
+            background: #e8f4f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            line-height: 1.8;
+        }
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>下载医生图片</h1>
+        
+        <div class="image-preview">
+            <img id="preview" src="" alt="图片预览" style="display: none;">
+        </div>
+        
+        <div class="instructions">
+            <h3>使用说明：</h3>
+            <ol>
+                <li>点击下方"下载图片"按钮</li>
+                <li>图片会自动下载到你的下载文件夹</li>
+                <li>将下载的图片重命名为 <code>doctor1.jpg</code></li>
+                <li>将图片复制到项目的 <code>static/doctor/</code> 目录中</li>
+            </ol>
+        </div>
+        
+        <button class="download-btn" onclick="downloadImage()">下载图片</button>
+        <button class="download-btn" onclick="copyImageUrl()">复制图片链接</button>
+        
+        <div id="status" style="margin-top: 20px; color: #666;"></div>
+    </div>
+
+    <script>
+        const imageUrl = 'https://tse3.mm.bing.net/th/id/OIP.pjiZj43omIDjm71Ywe8TbAHaFc?cb=ucfimg2&ucfimg=1&rs=1&pid=ImgDetMain&o=7&rm=3';
+        
+        // 显示图片预览
+        document.getElementById('preview').src = imageUrl;
+        document.getElementById('preview').style.display = 'block';
+        
+        // 下载图片
+        function downloadImage() {
+            const link = document.createElement('a');
+            link.href = imageUrl;
+            link.download = 'doctor1.jpg'; // 设置下载文件名
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            document.getElementById('status').innerHTML = 
+                '<p style="color: green;">✅ 图片已开始下载！</p>' +
+                '<p>请将下载的图片复制到项目的 <code>static/doctor/</code> 目录中</p>';
+        }
+        
+        // 复制图片链接
+        function copyImageUrl() {
+            navigator.clipboard.writeText(imageUrl).then(() => {
+                document.getElementById('status').innerHTML = 
+                    '<p style="color: green;">✅ 图片链接已复制到剪贴板！</p>';
+            }).catch(err => {
+                alert('复制失败，请手动复制：' + imageUrl);
+            });
+        }
+    </script>
+</body>
+</html>
+
