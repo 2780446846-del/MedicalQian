@@ -30,15 +30,32 @@
 					</view>
 				</view>
 				<view class="article-image">
-					<image :src="article.image" mode="aspectFill" class="article-img"></image>
+					<video 
+						v-if="article.mediaType === 'video' && article.video"
+						:src="getVideoUrl(article.video)"
+						class="article-video-thumb"
+						:controls="false"
+						:show-center-play-btn="true"
+						:show-play-btn="false"
+						:enable-play-gesture="false"
+						:autoplay="false"
+						:muted="true"
+						object-fit="cover"
+						:poster="getVideoPoster(article) || undefined"
+						@loadedmetadata="onVideoMetadataLoaded"
+					></video>
+					<image 
+						v-else
+						:src="article.image" 
+						mode="aspectFill" 
+						class="article-img"
+					></image>
 				</view>
 			</view>
 		</view>
 		
-		<!-- 主题切换按钮 -->
 		<ThemeToggle />
 		
-		<!-- 添加文章弹窗 -->
 		<uni-popup ref="addArticlePopup" type="center" :is-mask-click="false">
 			<view class="add-article-modal">
 				<view class="modal-header">
@@ -47,7 +64,6 @@
 				</view>
 				
 				<scroll-view class="modal-body" scroll-y>
-					<!-- 标题输入 -->
 					<view class="form-item">
 						<text class="form-label">文章标题</text>
 						<input 
@@ -58,7 +74,6 @@
 						/>
 					</view>
 					
-					<!-- 图片/视频上传 -->
 					<view class="form-item">
 						<text class="form-label">添加图片或视频</text>
 						<view class="media-upload">
@@ -110,7 +125,37 @@
 							
 							<!-- 视频上传区域 -->
 							<view v-if="mediaType === 'video'" class="upload-area">
-								<view v-if="articleForm.video" class="video-preview">
+								<!-- 上传中或暂停状态 -->
+								<view v-if="videoUploadStatus === 'uploading' || videoUploadStatus === 'paused'" class="upload-progress-container">
+									<view class="upload-progress-content">
+										<text class="upload-progress-icon">📤</text>
+										<text class="upload-progress-text">
+											{{ videoUploadStatus === 'paused' ? '已暂停' : '上传中' }} {{ videoUploadProgress }}%
+										</text>
+										<view class="progress-bar">
+											<view class="progress-fill" :style="{ width: videoUploadProgress + '%' }"></view>
+										</view>
+										<!-- 暂停/继续按钮 -->
+										<view class="upload-controls">
+											<view
+												v-if="videoUploadStatus === 'uploading'"
+												class="pause-btn"
+												@tap.stop="pauseVideoUpload"
+											>
+												⏸ 暂停
+											</view>
+											<view
+												v-else-if="videoUploadStatus === 'paused'"
+												class="resume-btn"
+												@tap.stop="resumeVideoUpload"
+											>
+												▶ 继续
+											</view>
+										</view>
+									</view>
+								</view>
+								<!-- 上传完成或已有视频：显示视频预览 -->
+								<view v-else-if="articleForm.video || videoUploadStatus === 'success'" class="video-preview">
 									<video 
 										:src="getVideoUrl(articleForm.video)" 
 										class="preview-video" 
@@ -126,15 +171,7 @@
 										<text>×</text>
 									</view>
 								</view>
-								<view v-else-if="videoUploadStatus === 'uploading'" class="upload-progress-container">
-									<view class="upload-progress-content">
-										<text class="upload-progress-icon">📤</text>
-										<text class="upload-progress-text">上传中 {{ videoUploadProgress }}%</text>
-										<view class="progress-bar">
-											<view class="progress-fill" :style="{ width: videoUploadProgress + '%' }"></view>
-										</view>
-									</view>
-								</view>
+								<!-- 未选择视频 -->
 								<view v-else class="upload-placeholder" @click="chooseVideo">
 									<text class="upload-icon">🎥</text>
 									<text class="upload-text">点击选择视频</text>
@@ -201,58 +238,16 @@ export default {
 			imageUploadStatus: 'idle', // idle | uploading | success | error
 			// 视频上传状态（用于大文件分片上传）
 			videoUploadProgress: 0,
-			videoUploadStatus: 'idle', // idle | uploading | success | error
-			// 医说文章数据
-			articles: [
-				{
-					id: 1,
-					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-					subtitle: '元宵吃汤圆,有什么禁忌吗?',
-					readCount: '8908',
-					date: '2020-03-03',
-					image: '/static/logo.png'
-				},
-				{
-					id: 2,
-					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-					subtitle: '元宵吃汤圆,有什么禁忌吗?',
-					readCount: '8908',
-					date: '2020-03-03',
-					image: '/static/logo.png'
-				},
-				{
-					id: 3,
-					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-					subtitle: '元宵吃汤圆,有什么禁忌吗?',
-					readCount: '8908',
-					date: '2020-03-03',
-					image: '/static/logo.png'
-				},
-				{
-					id: 4,
-					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-					subtitle: '元宵吃汤圆,有什么禁忌吗?',
-					readCount: '8908',
-					date: '2020-03-03',
-					image: '/static/logo.png'
-				},
-				{
-					id: 5,
-					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-					subtitle: '元宵吃汤圆,有什么禁忌吗?',
-					readCount: '8908',
-					date: '2020-03-03',
-					image: '/static/logo.png'
-				},
-				{
-					id: 6,
-					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-					subtitle: '元宵吃汤圆,有什么禁忌吗?',
-					readCount: '8908',
-					date: '2020-03-03',
-					image: '/static/logo.png'
-				}
-			]
+			videoUploadStatus: 'idle', // idle | uploading | paused | success | error
+			videoUploadPaused: false, // 是否暂停上传
+			videoUploadFileHash: '', // 当前上传的文件哈希（用于断点续传）
+			videoUploadBlob: null, // 当前上传的文件Blob（用于断点续传）
+			videoUploadFileName: '', // 当前上传的文件名
+			videoUploadExt: '', // 当前上传的文件扩展名
+			videoUploadTotalChunks: 0, // 总分片数
+			videoUploadChunkSize: 0, // 分片大小
+			// 医说文章数据（从本地存储加载）
+			articles: []
 		}
 	},
 	onLoad() {
@@ -336,6 +331,13 @@ export default {
 			this.imageUploadStatus = 'idle';
 			this.videoUploadProgress = 0;
 			this.videoUploadStatus = 'idle';
+			this.videoUploadPaused = false;
+			this.videoUploadFileHash = '';
+			this.videoUploadBlob = null;
+			this.videoUploadFileName = '';
+			this.videoUploadExt = '';
+			this.videoUploadTotalChunks = 0;
+			this.videoUploadChunkSize = 0;
 		},
 		// 切换媒体类型
 		switchMediaType(type) {
@@ -560,10 +562,7 @@ export default {
 			this.videoUploadStatus = 'uploading';
 			this.videoUploadProgress = 0;
 
-			uni.showLoading({
-				title: '准备上传视频...',
-				mask: true
-			});
+		
 
 			// 将 tempFilePath 转为 Blob
 			const fetchRes = await fetch(tempFilePath);
@@ -636,37 +635,20 @@ export default {
 			const chunkSize = 5 * 1024 * 1024; // 5MB 一个分片
 			const totalChunks = Math.ceil(blob.size / chunkSize);
 
-			for (let index = 0; index < totalChunks; index++) {
-				// 已经上传过该分片，跳过（断点续传）
-				if (uploadedChunks.includes(index)) {
-					this.videoUploadProgress = Math.round(((index + 1) / totalChunks) * 100);
-					continue;
-				}
+			// 保存上传信息用于断点续传
+			this.videoUploadFileHash = fileHash;
+			this.videoUploadBlob = blob;
+			this.videoUploadFileName = fileName;
+			this.videoUploadExt = ext;
+			this.videoUploadTotalChunks = totalChunks;
+			this.videoUploadChunkSize = chunkSize;
 
-				const start = index * chunkSize;
-				const end = Math.min(blob.size, start + chunkSize);
-				const chunkBlob = blob.slice(start, end);
+			// 开始上传分片
+			await this.uploadChunks(uploadedChunks, chunkSize, totalChunks, blob, fileHash, fileName, ext);
 
-				const formData = new FormData();
-				formData.append('fileHash', fileHash);
-				formData.append('chunkIndex', index);
-				formData.append('totalChunks', totalChunks);
-				formData.append('filename', fileName);
-				formData.append('ext', ext);
-				formData.append('chunk', chunkBlob, `${fileHash}-${index}${ext}`);
-
-				const uploadResp = await fetch(`${API_BASE_URL}/video/upload-chunk`, {
-					method: 'POST',
-					body: formData,
-                    credentials: 'include'
-				});
-
-				const uploadData = await uploadResp.json();
-				if (!uploadData.success) {
-					throw new Error(uploadData.message || `分片 ${index} 上传失败`);
-				}
-
-				this.videoUploadProgress = Math.round(((index + 1) / totalChunks) * 100);
+			// 检查上传是否被取消
+			if (this.videoUploadStatus !== 'uploading' && this.videoUploadStatus !== 'paused') {
+				return;
 			}
 
 			// 所有分片上传完成 -> 通知服务端合并
@@ -720,6 +702,192 @@ export default {
 				icon: 'success',
 				duration: 1500
 			});
+
+			// 清理上传状态
+			this.videoUploadFileHash = '';
+			this.videoUploadBlob = null;
+			this.videoUploadFileName = '';
+			this.videoUploadExt = '';
+			this.videoUploadTotalChunks = 0;
+			this.videoUploadChunkSize = 0;
+		},
+		// 上传分片（支持暂停/继续）
+		async uploadChunks(uploadedChunks, chunkSize, totalChunks, blob, fileHash, fileName, ext) {
+			for (let index = 0; index < totalChunks; index++) {
+				// 检查是否暂停
+				while (this.videoUploadPaused && this.videoUploadStatus === 'paused') {
+					await new Promise(resolve => setTimeout(resolve, 100));
+				}
+
+				// 如果状态不是上传中，退出循环
+				if (this.videoUploadStatus !== 'uploading' && this.videoUploadStatus !== 'paused') {
+					break;
+				}
+
+				// 已经上传过该分片，跳过（断点续传）
+				if (uploadedChunks.includes(index)) {
+					this.videoUploadProgress = Math.round(((index + 1) / totalChunks) * 100);
+					continue;
+				}
+
+				// 恢复上传状态
+				if (this.videoUploadStatus === 'paused') {
+					this.videoUploadStatus = 'uploading';
+					this.videoUploadPaused = false;
+				}
+
+				const start = index * chunkSize;
+				const end = Math.min(blob.size, start + chunkSize);
+				const chunkBlob = blob.slice(start, end);
+
+				const formData = new FormData();
+				formData.append('fileHash', fileHash);
+				formData.append('chunkIndex', index);
+				formData.append('totalChunks', totalChunks);
+				formData.append('filename', fileName);
+				formData.append('ext', ext);
+				formData.append('chunk', chunkBlob, `${fileHash}-${index}${ext}`);
+
+				const uploadResp = await fetch(`${API_BASE_URL}/video/upload-chunk`, {
+					method: 'POST',
+					body: formData,
+                    credentials: 'include'
+				});
+
+				const uploadData = await uploadResp.json();
+				if (!uploadData.success) {
+					throw new Error(uploadData.message || `分片 ${index} 上传失败`);
+				}
+
+				this.videoUploadProgress = Math.round(((index + 1) / totalChunks) * 100);
+			}
+		},
+		// 暂停视频上传
+		pauseVideoUpload(e) {
+			if (e) {
+				e.stopPropagation();
+			}
+			console.log('暂停上传被点击');
+			this.videoUploadPaused = true;
+			this.videoUploadStatus = 'paused';
+			uni.showToast({
+				title: '上传已暂停',
+				icon: 'none',
+				duration: 1500
+			});
+		},
+		// 继续视频上传
+		async resumeVideoUpload(e) {
+			if (e) {
+				e.stopPropagation();
+			}
+			console.log('继续上传被点击');
+			if (!this.videoUploadFileHash || !this.videoUploadBlob) {
+				uni.showToast({
+					title: '无法继续上传，请重新选择视频',
+					icon: 'none'
+				});
+				return;
+			}
+
+			this.videoUploadPaused = false;
+			this.videoUploadStatus = 'uploading';
+
+			try {
+				// 重新检查已上传的分片
+				const checkResp = await fetch(`${API_BASE_URL}/video/check`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					credentials: 'include',
+					body: JSON.stringify({
+						fileHash: this.videoUploadFileHash,
+						filename: this.videoUploadFileName,
+						size: this.videoUploadBlob.size,
+						ext: this.videoUploadExt
+					})
+				});
+
+				const checkData = await checkResp.json();
+				if (!checkData.success) {
+					throw new Error(checkData.message || '检查上传状态失败');
+				}
+
+				const checkInfo = checkData.data || {};
+				const uploadedChunks = checkInfo.uploadedChunks || [];
+
+				// 继续上传剩余分片
+				await this.uploadChunks(
+					uploadedChunks,
+					this.videoUploadChunkSize,
+					this.videoUploadTotalChunks,
+					this.videoUploadBlob,
+					this.videoUploadFileHash,
+					this.videoUploadFileName,
+					this.videoUploadExt
+				);
+
+				// 所有分片上传完成 -> 通知服务端合并
+				const mergeResp = await fetch(`${API_BASE_URL}/video/merge`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					},
+					credentials: 'include',
+					body: JSON.stringify({
+						fileHash: this.videoUploadFileHash,
+						filename: this.videoUploadFileName,
+						ext: this.videoUploadExt,
+						totalChunks: this.videoUploadTotalChunks
+					})
+				});
+
+				const mergeData = await mergeResp.json();
+				uni.hideLoading();
+
+				if (!mergeData.success || !mergeData.data || !mergeData.data.url) {
+					throw new Error(mergeData.message || '视频合并失败');
+				}
+
+				// 处理视频URL
+				let videoUrl = mergeData.data.url;
+				if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
+					videoUrl = this.getFullFileUrl(videoUrl);
+				}
+
+				if (!videoUrl || videoUrl.trim() === '') {
+					throw new Error('视频URL无效');
+				}
+
+				videoUrl = videoUrl.trim();
+				this.articleForm.video = videoUrl;
+				this.mediaType = 'video';
+				this.videoUploadStatus = 'success';
+				this.videoUploadProgress = 100;
+
+				// 清理上传状态
+				this.videoUploadFileHash = '';
+				this.videoUploadBlob = null;
+				this.videoUploadFileName = '';
+				this.videoUploadExt = '';
+				this.videoUploadTotalChunks = 0;
+				this.videoUploadChunkSize = 0;
+
+				uni.showToast({
+					title: '视频上传完成',
+					icon: 'success',
+					duration: 1500
+				});
+			} catch (error) {
+				console.error('继续上传失败:', error);
+				this.videoUploadStatus = 'error';
+				uni.showToast({
+					title: '继续上传失败，请重试',
+					icon: 'none',
+					duration: 2000
+				});
+			}
 		},
 		// 将后端返回的相对路径转换为完整可访问的URL
 		getFullFileUrl(path) {
@@ -802,6 +970,25 @@ export default {
 			console.log('   转换后:', fullUrl);
 			return fullUrl;
 		},
+		// 获取视频封面图
+		getVideoPoster(article) {
+			// 如果文章有保存的封面图且不是默认值，使用它
+			if (article.image && article.image !== '/static/logo.png' && article.image.trim() !== '') {
+				// 如果是完整URL，直接返回
+				if (article.image.startsWith('http://') || article.image.startsWith('https://')) {
+					return article.image;
+				}
+				// 否则转换为完整URL
+				return this.getFullFileUrl(article.image);
+			}
+			// 如果没有封面图，返回null，让video自动使用第一帧（不显示默认图标）
+			return null;
+		},
+		// 视频元数据加载完成（用于确保第一帧显示）
+		onVideoMetadataLoaded(e) {
+			// 视频元数据加载完成，第一帧应该已经可以显示了
+			console.log('视频元数据加载完成');
+		},
 		// 删除视频
 		deleteVideo() {
 			this.articleForm.video = '';
@@ -809,21 +996,12 @@ export default {
 		// 加载文章列表
 		loadArticles() {
 			try {
+				// 直接从本地存储加载所有文章
 				const savedArticles = getAllArticles();
-				
-				// 如果有保存的文章，合并到现有列表中
-				if (savedArticles && savedArticles.length > 0) {
-					// 获取现有的默认文章ID集合 
-					const defaultIds = this.articles.map(a => a.id);
-					
-					// 过滤掉已存在的文章，只添加新保存的文章
-					const newArticles = savedArticles.filter(a => !defaultIds.includes(a.id));
-					
-					// 合并文章列表（保存的文章在前，默认文章在后）
-					this.articles = [...newArticles, ...this.articles];
-				}
+				this.articles = savedArticles || [];
 			} catch (error) {
 				console.error('加载文章列表失败:', error);
+				this.articles = [];
 			}
 		},
 		// 更新文章阅读数
@@ -874,15 +1052,14 @@ export default {
 			
 			try {
 				// 保存文章到本地存储
-				const newArticle = saveArticle({
+				// saveArticle 函数内部已经会触发 articlesUpdated 事件
+				// loadArticles 方法会通过事件监听自动加载新文章，无需手动添加
+				saveArticle({
 					title: this.articleForm.title.trim(),
 					content: this.articleForm.content.trim(),
 					image: this.articleForm.image,
 					video: this.articleForm.video
 				});
-				
-				// 将新文章添加到列表开头
-				this.articles.unshift(newArticle);
 				
 				uni.hideLoading();
 				uni.showToast({
@@ -1105,6 +1282,12 @@ export default {
 				width: 100%;
 				height: 100%;
 			}
+			
+			.article-video-thumb {
+				width: 100%;
+				height: 100%;
+				border-radius: 12rpx;
+			}
 		}
 	}
 }
@@ -1309,6 +1492,8 @@ export default {
 					align-items: center;
 					justify-content: center;
 					box-sizing: border-box;
+					position: relative;
+					pointer-events: auto;
 					
 					.upload-progress-content {
 						width: 80%;
@@ -1341,6 +1526,54 @@ export default {
 								border-radius: 4rpx;
 								transition: width 0.3s ease;
 								animation: progress-shine 1.5s ease-in-out infinite;
+							}
+						}
+
+						.upload-controls {
+							margin-top: 20rpx;
+							display: flex;
+							justify-content: center;
+							position: relative;
+							z-index: 1000;
+							pointer-events: auto;
+							
+							.pause-btn, .resume-btn {
+								padding: 12rpx 32rpx;
+								border-radius: 30rpx;
+								font-size: 26rpx;
+								line-height: 1.5;
+								cursor: pointer;
+								transition: all 0.3s ease;
+								position: relative;
+								z-index: 1001;
+								user-select: none;
+								-webkit-tap-highlight-color: transparent;
+								min-width: 120rpx;
+								text-align: center;
+								pointer-events: auto;
+								
+								&:active {
+									opacity: 0.7;
+									transform: scale(0.95);
+								}
+							}
+							
+							.pause-btn {
+								background-color: #ff9500;
+								color: #ffffff;
+								
+								&:hover {
+									background-color: #ff8800;
+								}
+							}
+							
+							.resume-btn {
+								background-color: #4a90e2;
+								color: #ffffff;
+								
+								&:hover {
+									background-color: #3a80d2;
+								}
 							}
 						}
 					}

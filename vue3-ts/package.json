@@ -16,9 +16,7 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix --cache",
-    "format": "prettier --write \"**/*.{js,ts,json,vue,md}\"",
-    "format:check": "prettier --check \"**/*.{js,ts,json,vue,md}\"",
-    "prepare": "husky install"
+    "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
     "@babylonjs/core": "^8.43.0",
@@ -52,23 +50,12 @@
     "eslint": "^9.39.1",
     "eslint-plugin-playwright": "^2.3.0",
     "eslint-plugin-vue": "~10.5.1",
-    "husky": "^9.1.7",
     "jiti": "^2.6.1",
-    "lint-staged": "^15.2.11",
     "npm-run-all2": "^8.0.4",
     "prettier": "3.6.2",
     "typescript": "~5.9.0",
     "vite": "^7.2.4",
     "vite-plugin-vue-devtools": "^8.0.5",
     "vue-tsc": "^3.1.5"
-  },
-  "lint-staged": {
-    "*.{js,ts}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,vue,md}": [
-      "prettier --write"
-    ]
   }
 }

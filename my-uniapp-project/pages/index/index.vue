@@ -219,7 +219,23 @@
             </view>
           </view>
           <view class="article-image">
-            <image :src="article.image" mode="aspectFill" class="article-img"></image>
+            <video 
+              v-if="article.mediaType === 'video' && article.video"
+              :src="getVideoUrl(article.video)"
+              class="article-video-thumb"
+              :controls="false"
+              :show-center-play-btn="true"
+              :show-play-btn="false"
+              :enable-play-gesture="false"
+              object-fit="cover"
+              :poster="getVideoPoster(article) || undefined"
+            ></video>
+            <image 
+              v-else
+              :src="article.image" 
+              mode="aspectFill" 
+              class="article-img"
+            ></image>
           </view>
         </view>
       </view>
@@ -234,6 +250,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import { getAllArticles } from '@/utils/articleStorage.js'
+import { API_BASE_URL } from '@/utils/config.js'
 
 // 检查登录状态
 function checkLogin(): boolean {
@@ -287,6 +305,8 @@ interface Article {
   readCount: string
   date: string
   image: string
+  video?: string
+  mediaType?: string
 }
 
 const activeTab = ref('all') // 热门医院分类：all, comprehensive, children, women, orthopedics
@@ -382,41 +402,75 @@ const doctors = ref<Doctor[]>([
   }
 ])
 
-// 医说文章数据
-const articles = ref<Article[]>([
-  {
-    id: 1,
-    title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-    subtitle: '元宵吃汤圆,有什么禁忌吗?',
-    readCount: '8908',
-    date: '2020-03-03',
-    image: '/static/文章.png'
-  },
-  {
-    id: 2,
-    title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-    subtitle: '元宵吃汤圆,有什么禁忌吗?',
-    readCount: '8908',
-    date: '2020-03-03',
-    image: '/static/文章.png'
-  },
-  {
-    id: 3,
-    title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-    subtitle: '元宵吃汤圆,有什么禁忌吗?',
-    readCount: '8908',
-    date: '2020-03-03',
-    image: '/static/文章.png'
-  },
-  {
-    id: 4,
-    title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
-    subtitle: '元宵吃汤圆,有什么禁忌吗?',
-    readCount: '8908',
-    date: '2020-03-03',
-    image: '/static/文章.png'
+// 医说文章数据（从本地存储加载，只显示前4条）
+const articles = ref<Article[]>([])
+
+// 获取完整文件URL
+const getFullFileUrl = (pathStr: string): string => {
+  if (!pathStr) return ''
+  
+  const path = String(pathStr).trim()
+  
+  // 如果已经是完整URL，直接返回
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
   }
-])
+  
+  // 如果是静态资源路径，直接返回
+  if (path.startsWith('/static/')) {
+    return path
+  }
+  
+  // 获取后端服务器基础地址
+  let baseOrigin = API_BASE_URL.replace(/\/api$/, '')
+  if (!baseOrigin || baseOrigin === '/' || baseOrigin.startsWith('/')) {
+    baseOrigin = 'http://localhost:3000'
+  }
+  
+  return `${baseOrigin}${path}`
+}
+
+// 获取视频URL
+const getVideoUrl = (url: string | undefined): string => {
+  if (!url) return ''
+  
+  const urlStr = String(url).trim()
+  
+  // 如果已经是完整URL，直接返回
+  if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) {
+    return urlStr
+  }
+  
+  // 相对路径转换为完整URL
+  return getFullFileUrl(urlStr)
+}
+
+// 获取视频封面图
+const getVideoPoster = (article: Article): string | null => {
+  // 如果文章有保存的封面图且不是默认值，使用它
+  if (article.image && article.image !== '/static/logo.png' && article.image.trim() !== '') {
+    // 如果是完整URL，直接返回
+    if (article.image.startsWith('http://') || article.image.startsWith('https://')) {
+      return article.image
+    }
+    // 否则转换为完整URL
+    return getFullFileUrl(article.image)
+  }
+  // 如果没有封面图，返回null，让video自动使用第一帧
+  return null
+}
+
+// 加载文章列表
+const loadArticles = () => {
+  try {
+    // 直接从本地存储加载所有文章，只显示前4条
+    const savedArticles = getAllArticles()
+    articles.value = (savedArticles || []).slice(0, 4) as Article[]
+  } catch (error) {
+    console.error('加载文章列表失败:', error)
+    articles.value = []
+  }
+}
 
 // 切换分类
 const switchTab = (tab: string) => {
@@ -625,6 +679,8 @@ onMounted(() => {
     return
   }
   loadCity()
+  // 加载文章列表
+  loadArticles()
 })
 
 // 页面卸载时清理事件监听
@@ -635,6 +691,8 @@ onUnmounted(() => {
     uni.$off('cityChanged')
     // @ts-ignore
     uni.$off('articleReadCountUpdated')
+    // @ts-ignore
+    uni.$off('articlesUpdated')
   }
 })
 
@@ -657,6 +715,12 @@ if (typeof uni !== 'undefined' && uni.$on) {
       }
     }
   })
+  
+  // 监听文章更新事件（当有新文章发布时自动刷新）
+  // @ts-ignore
+  uni.$on('articlesUpdated', () => {
+    loadArticles()
+  })
 }
 
 // 页面显示时自动刷新城市（从城市选择页返回时会触发）
@@ -668,6 +732,8 @@ function onShow() {
     return
   }
   loadCity()
+  // 重新加载文章列表（可能在其他页面添加了新文章）
+  loadArticles()
 }
 </script>
 
@@ -1346,6 +1412,12 @@ function onShow() {
         .article-img {
           width: 100%;
           height: 100%;
+        }
+        
+        .article-video-thumb {
+          width: 100%;
+          height: 100%;
+          border-radius: 12rpx;
         }
       }
     }
