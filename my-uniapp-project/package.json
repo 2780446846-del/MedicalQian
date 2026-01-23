@@ -5,7 +5,8 @@
   "scripts": {
     "lint": "eslint . --ext .js,.ts,.vue --fix",
     "format": "prettier --write \"**/*.{js,ts,json,vue,md}\"",
-    "format:check": "prettier --check \"**/*.{js,ts,json,vue,md}\""
+    "format:check": "prettier --check \"**/*.{js,ts,json,vue,md}\"",
+    "prepare": "husky install"
   },
   "dependencies": {
     "axios": "^1.13.2",
@@ -17,7 +18,18 @@
     "@vue/eslint-config-prettier": "^10.2.0",
     "eslint": "^9.39.1",
     "eslint-plugin-vue": "^10.5.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.11",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3"
+  },
+  "lint-staged": {
+    "*.{js,ts}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,vue,md}": [
+      "prettier --write"
+    ]
   }
 }

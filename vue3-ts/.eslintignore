@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+build
+coverage
+*.min.js
+*.bundle.js
+.git
+.husky
+
