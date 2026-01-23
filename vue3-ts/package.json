@@ -16,7 +16,8 @@
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix --cache",
-    "format": "prettier --write --experimental-cli src/"
+    "format": "prettier --write \"**/*.{js,ts,json,vue,md}\"",
+    "format:check": "prettier --check \"**/*.{js,ts,json,vue,md}\""
   },
   "dependencies": {
     "@babylonjs/core": "^8.43.0",
