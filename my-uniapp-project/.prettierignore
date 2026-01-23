@@ -1,0 +1,13 @@
+node_modules
+dist
+build
+coverage
+unpackage
+uni_modules
+*.min.js
+*.bundle.js
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+.git
+

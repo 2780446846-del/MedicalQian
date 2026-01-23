@@ -1,0 +1,10 @@
+node_modules
+dist
+build
+coverage
+unpackage
+uni_modules
+*.min.js
+*.bundle.js
+.git
+

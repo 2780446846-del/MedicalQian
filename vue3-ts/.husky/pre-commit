@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Husky pre-commit hook for vue3-ts project
+# Note: This hook will work if this is an independent Git repository
+# If not, you can manually run: npx lint-staged
+
+npx lint-staged
+

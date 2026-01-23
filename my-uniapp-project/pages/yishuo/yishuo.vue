@@ -23,6 +23,7 @@
 						</view>
 					</view>
 					<view class="article-image">
+<<<<<<< HEAD
 						<video 
 							v-if="article.mediaType === 'video' && article.video"
 							:src="getVideoUrl(article.video)"
@@ -43,6 +44,9 @@
 							mode="aspectFill" 
 							class="article-img"
 						></image>
+=======
+						<image :src="article.image" mode="aspectFill" class="article-img"></image>
+>>>>>>> origin/main
 					</view>
 				</view>
 			</view>
@@ -57,7 +61,10 @@
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import { getCurrentTheme } from '@/utils/theme.js';
 import { getAllArticles } from '@/utils/articleStorage.js';
+<<<<<<< HEAD
 import { API_BASE_URL } from '@/utils/config.js';
+=======
+>>>>>>> origin/main
 
 export default {
 	components: {
@@ -66,8 +73,46 @@ export default {
 	data() {
 		return {
 			theme: getCurrentTheme(),
+<<<<<<< HEAD
 			// 医说文章数据（从本地存储加载，只显示前4条）
 			articles: []
+=======
+			// 医说文章数据
+			articles: [
+				{
+					id: 1,
+					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
+					subtitle: '元宵吃汤圆,有什么禁忌吗?',
+					readCount: '8908',
+					date: '2020-03-03',
+					image: '/static/logo.png'
+				},
+				{
+					id: 2,
+					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
+					subtitle: '元宵吃汤圆,有什么禁忌吗?',
+					readCount: '8908',
+					date: '2020-03-03',
+					image: '/static/logo.png'
+				},
+				{
+					id: 3,
+					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
+					subtitle: '元宵吃汤圆,有什么禁忌吗?',
+					readCount: '8908',
+					date: '2020-03-03',
+					image: '/static/logo.png'
+				},
+				{
+					id: 4,
+					title: '空腹能不能吃汤圆? 无糖汤圆不"胖人"吗?',
+					subtitle: '元宵吃汤圆,有什么禁忌吗?',
+					readCount: '8908',
+					date: '2020-03-03',
+					image: '/static/logo.png'
+				}
+			]
+>>>>>>> origin/main
 		}
 	},
 	onLoad() {
@@ -93,12 +138,31 @@ export default {
 		// 加载文章列表
 		loadArticles() {
 			try {
+<<<<<<< HEAD
 				// 直接从本地存储加载所有文章，只显示前4条
 				const savedArticles = getAllArticles();
 				this.articles = (savedArticles || []).slice(0, 4);
 			} catch (error) {
 				console.error('加载文章列表失败:', error);
 				this.articles = [];
+=======
+				const savedArticles = getAllArticles();
+				
+				// 如果有保存的文章，合并到现有列表中
+				if (savedArticles && savedArticles.length > 0) {
+					// 获取现有的默认文章ID集合
+					const defaultIds = this.articles.map(a => a.id);
+					
+					// 过滤掉已存在的文章，只添加新保存的文章
+					const newArticles = savedArticles.filter(a => !defaultIds.includes(a.id));
+					
+					// 合并文章列表（保存的文章在前，默认文章在后，只显示前4条）
+					const mergedArticles = [...newArticles, ...this.articles];
+					this.articles = mergedArticles.slice(0, 4);
+				}
+			} catch (error) {
+				console.error('加载文章列表失败:', error);
+>>>>>>> origin/main
 			}
 		},
 		// 更新文章阅读数
@@ -153,6 +217,7 @@ export default {
 					});
 				}
 			});
+<<<<<<< HEAD
 		},
 		// 获取完整文件URL
 		getFullFileUrl(pathStr) {
@@ -214,6 +279,8 @@ export default {
 		onVideoMetadataLoaded(e) {
 			// 视频元数据加载完成，第一帧应该已经可以显示了
 			console.log('视频元数据加载完成');
+=======
+>>>>>>> origin/main
 		}
 	}
 }
@@ -326,12 +393,15 @@ export default {
 					width: 100%;
 					height: 100%;
 				}
+<<<<<<< HEAD
 				
 				.article-video-thumb {
 					width: 100%;
 					height: 100%;
 					border-radius: 12rpx;
 				}
+=======
+>>>>>>> origin/main
 			}
 		}
 	}
