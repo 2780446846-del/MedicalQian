@@ -1413,12 +1413,15 @@ function onShow() {
           width: 100%;
           height: 100%;
         }
+<<<<<<< HEAD
         
         .article-video-thumb {
           width: 100%;
           height: 100%;
           border-radius: 12rpx;
         }
+=======
+>>>>>>> origin/main
       }
     }
   }
