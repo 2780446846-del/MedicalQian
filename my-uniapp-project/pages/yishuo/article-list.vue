@@ -137,22 +137,20 @@
 										</view>
 										<!-- 暂停/继续按钮 -->
 										<view class="upload-controls">
-											<button 
-												v-if="videoUploadStatus === 'uploading'" 
-												class="pause-btn" 
-												@click="pauseVideoUpload"
-												@tap="pauseVideoUpload"
+											<view
+												v-if="videoUploadStatus === 'uploading'"
+												class="pause-btn"
+												@tap.stop="pauseVideoUpload"
 											>
 												⏸ 暂停
-											</button>
-											<button 
-												v-else-if="videoUploadStatus === 'paused'" 
-												class="resume-btn" 
-												@click="resumeVideoUpload"
-												@tap="resumeVideoUpload"
+											</view>
+											<view
+												v-else-if="videoUploadStatus === 'paused'"
+												class="resume-btn"
+												@tap.stop="resumeVideoUpload"
 											>
 												▶ 继续
-											</button>
+											</view>
 										</view>
 									</view>
 								</view>
@@ -564,10 +562,7 @@ export default {
 			this.videoUploadStatus = 'uploading';
 			this.videoUploadProgress = 0;
 
-			uni.showLoading({
-				title: '准备上传视频...',
-				mask: true
-			});
+		
 
 			// 将 tempFilePath 转为 Blob
 			const fetchRes = await fetch(tempFilePath);
@@ -1539,25 +1534,23 @@ export default {
 							display: flex;
 							justify-content: center;
 							position: relative;
-							z-index: 10;
+							z-index: 1000;
+							pointer-events: auto;
 							
 							.pause-btn, .resume-btn {
 								padding: 12rpx 32rpx;
 								border-radius: 30rpx;
 								font-size: 26rpx;
 								line-height: 1.5;
-								border: none;
 								cursor: pointer;
 								transition: all 0.3s ease;
 								position: relative;
-								z-index: 11;
+								z-index: 1001;
 								user-select: none;
 								-webkit-tap-highlight-color: transparent;
 								min-width: 120rpx;
-								
-								&::after {
-									border: none;
-								}
+								text-align: center;
+								pointer-events: auto;
 								
 								&:active {
 									opacity: 0.7;
