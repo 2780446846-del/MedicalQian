@@ -13,14 +13,14 @@
         @click="viewConsultation(consultation)"
       >
         <view class="consultation-header">
-          <!-- 左侧：前台账号信息 -->
+          <!-- 左侧：医生信息 -->
           <view class="user-info-section">
             <view class="user-avatar">
-              <text class="avatar-text">{{ getAvatarText(currentUserDisplayName) }}</text>
+              <text class="avatar-text">{{ getAvatarText(getDoctorName(consultation)) }}</text>
             </view>
             <view class="user-info-text">
-              <text class="user-name">{{ currentUserDisplayName }}</text>
-              <text class="user-details" v-if="currentUserDetails">{{ currentUserDetails }}</text>
+              <text class="user-name">{{ getDoctorName(consultation) }}</text>
+              <text class="user-details" v-if="getDoctorDetails(consultation)">{{ getDoctorDetails(consultation) }}</text>
             </view>
           </view>
           
@@ -171,6 +171,7 @@ export default {
                   id: consultation._id || consultation.id,
                   patientId: consultation.patientId,
                   doctorId: consultation.doctorId,
+                  doctorInfo: consultation.doctorInfo || {}, // 保存医生信息
                   patientInfo: consultation.patientInfo,
                   symptomDescription: consultation.symptomDescription,
                   symptomImages: consultation.symptomImages || [],
@@ -255,6 +256,86 @@ export default {
     // 格式化时间
     formatTime(timestamp) {
       return formatTime(timestamp)
+    },
+    
+    // 获取医生名字
+    getDoctorName(consultation) {
+      if (!consultation) {
+        return '医生'
+      }
+      
+      // 优先使用后端返回的医生信息
+      if (consultation.doctorInfo && consultation.doctorInfo.name) {
+        return consultation.doctorInfo.name
+      }
+      
+      // 如果当前用户是医生（doctorId以doctor_开头，或者当前用户ID等于doctorId），显示当前用户的名字
+      const currentUserId = this.currentUserInfo?.id || this.currentUserInfo?._id || this.currentUserInfo?.userId || this.currentUserInfo?.username || this.currentUserInfo?.phone
+      const doctorId = consultation?.doctorId
+      
+      // 判断当前用户是否是医生
+      if (doctorId && currentUserId) {
+        const isCurrentUserDoctor = (
+          doctorId.startsWith('doctor_') && currentUserId === doctorId.replace('doctor_', '') ||
+          currentUserId === doctorId ||
+          currentUserId?.startsWith('doctor_')
+        )
+        
+        if (isCurrentUserDoctor) {
+          // 当前用户是医生，显示当前用户的名字
+          return this.currentUserDisplayName
+        }
+      }
+      
+      // 如果是前台账号，需要根据doctorId获取医生名字
+      // 如果doctorId包含名字信息，尝试提取
+      if (doctorId) {
+        // 如果doctorId以doctor_开头，去掉前缀后作为显示名称
+        if (doctorId.startsWith('doctor_')) {
+          const doctorIdWithoutPrefix = doctorId.replace('doctor_', '')
+          // 如果去掉前缀后是数字或ID，返回"医生"；否则尝试作为名字使用
+          if (/^\d+$/.test(doctorIdWithoutPrefix)) {
+            return '医生'
+          }
+          return doctorIdWithoutPrefix || '医生'
+        }
+        // 如果doctorId看起来像是名字（包含中文），直接使用
+        if (/[\u4e00-\u9fa5]/.test(doctorId)) {
+          return doctorId
+        }
+        return '医生'
+      }
+      
+      // 默认返回医生
+      return '医生'
+    },
+    
+    // 获取医生详情（性别、年龄等）
+    getDoctorDetails(consultation) {
+      // 如果当前用户是医生，显示当前用户的详情
+      const currentUserId = this.currentUserInfo?.id || this.currentUserInfo?._id || this.currentUserInfo?.userId || this.currentUserInfo?.username || this.currentUserInfo?.phone
+      const doctorId = consultation?.doctorId
+      
+      const isCurrentUserDoctor = doctorId && (
+        doctorId.startsWith('doctor_') && currentUserId === doctorId.replace('doctor_', '') ||
+        currentUserId === doctorId ||
+        currentUserId?.startsWith('doctor_')
+      )
+      
+      if (isCurrentUserDoctor) {
+        return this.currentUserDetails
+      }
+      
+      // 如果是前台账号，尝试从doctorInfo中获取医生详情
+      if (consultation.doctorInfo) {
+        const gender = (consultation.doctorInfo.gender || '').trim()
+        const age = (consultation.doctorInfo.age || '').toString().trim()
+        if (gender || age) {
+          return `${gender}${gender && age ? ' | ' : ''}${age}${age ? '岁' : ''}`
+        }
+      }
+      
+      return ''
     },
     
     // 获取头像文字（取名称的第一个字符）

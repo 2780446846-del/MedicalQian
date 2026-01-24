@@ -446,12 +446,35 @@ function handleReceiveMessage(message: any) {
   }
   
   // 检查消息是否发送给当前医生
+  // 1. 直接匹配：toUserId === doctor.id
+  // 2. 患者发送给医生：fromUserId是患者ID，toUserId是医生ID（可能是默认值'doctor_001'或其他医生ID）
+  // 3. 消息来自当前选中的患者（如果选中了患者）
+  // 4. 关键：如果消息是患者发送的（fromUserId不是医生），且当前医生在岗，就应该接收
+  //    这样可以确保在岗医生能收到所有患者发送的消息，即使toUserId不完全匹配
   const isMessageForCurrentDoctor = message.toUserId === doctor.id
-  // 或者消息来自当前选中的患者（如果选中了患者）
+  const isMessageToAnyDoctor = message.toUserId && message.toUserId.startsWith('doctor_') && !message.fromUserId.startsWith('doctor_')
   const isMessageFromSelectedPatient = selectedPatientId.value && message.fromUserId === selectedPatientId.value
+  // 如果消息是患者发送的（fromUserId不是医生）
+  const isPatientMessage = message.fromUserId && !message.fromUserId.startsWith('doctor_')
   
-  if (isMessageForCurrentDoctor || isMessageFromSelectedPatient) {
-    console.log('✅ 消息匹配成功，添加到聊天列表')
+  // 判断是否应该接收此消息
+  // 核心逻辑：如果医生在岗，且消息来自患者，就应该接收（无论toUserId是什么）
+  const shouldReceiveMessage = isMessageForCurrentDoctor || 
+    (isMessageToAnyDoctor && isOnDuty.value) || 
+    isMessageFromSelectedPatient || 
+    (isPatientMessage && isOnDuty.value)
+  
+  if (shouldReceiveMessage) {
+    console.log('✅ 消息匹配成功，添加到聊天列表', {
+      isMessageForCurrentDoctor,
+      isMessageToAnyDoctor,
+      isMessageFromSelectedPatient,
+      isPatientMessage,
+      isOnDuty: isOnDuty.value,
+      fromUserId: message.fromUserId,
+      toUserId: message.toUserId,
+      doctorId: doctor.id
+    })
     
     // 如果是患者信息卡片类型，解析数据
     let patientCardData: PatientCardData | undefined = undefined
@@ -518,7 +541,17 @@ function handleReceiveMessage(message: any) {
     
     scrollToBottom()
   } else {
-    console.warn('⚠️ 消息不匹配当前医生或患者，已添加到未读计数')
+    console.warn('⚠️ 消息不匹配当前医生或患者', {
+      fromUserId: message.fromUserId,
+      toUserId: message.toUserId,
+      currentDoctorId: doctor.id,
+      isOnDuty: isOnDuty.value,
+      isPatientMessage: message.fromUserId && !message.fromUserId.startsWith('doctor_'),
+      selectedPatientId: selectedPatientId.value
+    })
+    // 注意：这里不添加消息，因为消息匹配条件不满足
+    // 但如果医生在岗且消息来自患者，理论上应该接收
+    // 这种情况可能是消息路由有问题，需要检查后端日志
   }
 }
 
@@ -1215,8 +1248,21 @@ async function selectPatient(patient: Patient) {
   isLoadingHistory.value = true
   try {
     const doctor = doctorInfo.value
+    console.log('🔄 加载历史消息:', {
+      patientId: patient.id,
+      doctorId: doctor.id,
+      patientName: patient.name
+    })
     const response = await fetch(`http://localhost:3000/api/chat/consultation?patientId=${patient.id}&doctorId=${doctor.id}`)
+    if (!response.ok) {
+      throw new Error(`HTTP错误: ${response.status} ${response.statusText}`)
+    }
     const result = await response.json()
+    console.log('📦 历史消息API响应:', {
+      success: result.success,
+      hasConsultation: !!result.data?.consultation,
+      messageCount: result.data?.messages?.length || 0
+    })
     
     if (result.success && result.data) {
       const consultation = result.data.consultation
@@ -1261,7 +1307,17 @@ async function selectPatient(patient: Patient) {
       
       messages.value = sortedMessages
       
-      console.log('✅ 加载历史消息:', sortedMessages.length, '条（已按时间排序）')
+      console.log('✅ 加载历史消息:', {
+        count: sortedMessages.length,
+        patientId: patient.id,
+        doctorId: doctor.id,
+        messages: sortedMessages.map(m => ({
+          id: m.id,
+          sender: m.sender,
+          content: m.content?.substring(0, 30),
+          timestamp: m.timestamp
+        }))
+      })
       
       // 滚动到底部显示最新消息
       nextTick(() => {

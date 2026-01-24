@@ -135,7 +135,7 @@
 										<view class="progress-bar">
 											<view class="progress-fill" :style="{ width: videoUploadProgress + '%' }"></view>
 										</view>
-										<!-- 暂停/继续按钮 -->
+										<!-- 暂停/继续/取消按钮 -->
 										<view class="upload-controls">
 											<view
 												v-if="videoUploadStatus === 'uploading'"
@@ -150,6 +150,12 @@
 												@tap.stop="resumeVideoUpload"
 											>
 												▶ 继续
+											</view>
+											<view
+												class="cancel-btn"
+												@tap.stop="cancelVideoUpload"
+											>
+												✕ 取消
 											</view>
 										</view>
 									</view>
@@ -457,7 +463,7 @@ export default {
 			console.log('✅ 视频开始播放:', this.articleForm.video);
 		},
 		// 视频预览加载失败
-		onVideoPreviewError(e) {
+		async onVideoPreviewError(e) {
 			const originalUrl = this.articleForm.video;
 			const convertedUrl = this.getVideoUrl(originalUrl);
 			console.error('❌ 视频预览加载失败:', e);
@@ -465,11 +471,47 @@ export default {
 			console.error('转换后URL:', convertedUrl);
 			console.error('URL类型:', typeof originalUrl);
 			console.error('是否为完整URL:', originalUrl && (originalUrl.startsWith('http://') || originalUrl.startsWith('https://')));
-			uni.showToast({
-				title: '视频加载失败，请检查URL或格式',
-				icon: 'none',
-				duration: 2000
-			});
+			
+			// 尝试诊断问题
+			if (convertedUrl && (convertedUrl.startsWith('http://') || convertedUrl.startsWith('https://'))) {
+				try {
+					// 尝试HEAD请求检查文件是否存在
+					const headResp = await fetch(convertedUrl, {
+						method: 'HEAD',
+						mode: 'no-cors' // 避免CORS问题
+					});
+					console.log('HEAD请求结果:', headResp);
+				} catch (headError) {
+					console.warn('HEAD请求失败（可能是CORS限制）:', headError);
+				}
+				
+				// 检查是否是COS URL
+				if (convertedUrl.includes('cos.') || convertedUrl.includes('myqcloud.com')) {
+					console.warn('⚠️ 这是腾讯云COS URL，可能的原因：');
+					console.warn('1. 文件可能未成功上传到COS（合并失败）');
+					console.warn('2. COS的CORS配置可能不允许当前域名访问');
+					console.warn('3. 文件可能已过期或被删除');
+					console.warn('4. 视频文件格式可能不被浏览器支持');
+					
+					uni.showToast({
+						title: '视频加载失败：可能是COS文件不存在或CORS限制',
+						icon: 'none',
+						duration: 3000
+					});
+				} else {
+					uni.showToast({
+						title: '视频加载失败，请检查URL或格式',
+						icon: 'none',
+						duration: 2000
+					});
+				}
+			} else {
+				uni.showToast({
+					title: '视频URL无效',
+					icon: 'none',
+					duration: 2000
+				});
+			}
 		},
 		// 选择视频
 		chooseVideo() {
@@ -487,7 +529,7 @@ export default {
 					try {
 						await this.handleBigVideoUploadH5(res);
 					} catch (error) {
-						console.error('大文件分片上传失败，回退到普通上传:', error);
+						
 						await this.uploadVideoNormal(tempFilePath);
 					}
 					// #endif
@@ -714,14 +756,20 @@ export default {
 		// 上传分片（支持暂停/继续）
 		async uploadChunks(uploadedChunks, chunkSize, totalChunks, blob, fileHash, fileName, ext) {
 			for (let index = 0; index < totalChunks; index++) {
-				// 检查是否暂停
-				while (this.videoUploadPaused && this.videoUploadStatus === 'paused') {
+				// 检查是否暂停 - 使用更可靠的检查方式
+				while (this.videoUploadPaused) {
+					if (this.videoUploadStatus !== 'paused' && this.videoUploadStatus !== 'uploading') {
+						// 状态异常，退出上传
+						console.log(`上传中断：状态为 ${this.videoUploadStatus}`);
+						return;
+					}
 					await new Promise(resolve => setTimeout(resolve, 100));
 				}
 
-				// 如果状态不是上传中，退出循环
+				// 如果状态不是上传中或暂停，退出循环
 				if (this.videoUploadStatus !== 'uploading' && this.videoUploadStatus !== 'paused') {
-					break;
+					console.log(`上传中断：状态为 ${this.videoUploadStatus}`);
+					return;
 				}
 
 				// 已经上传过该分片，跳过（断点续传）
@@ -730,7 +778,7 @@ export default {
 					continue;
 				}
 
-				// 恢复上传状态
+				// 确保状态是上传中
 				if (this.videoUploadStatus === 'paused') {
 					this.videoUploadStatus = 'uploading';
 					this.videoUploadPaused = false;
@@ -748,19 +796,28 @@ export default {
 				formData.append('ext', ext);
 				formData.append('chunk', chunkBlob, `${fileHash}-${index}${ext}`);
 
-				const uploadResp = await fetch(`${API_BASE_URL}/video/upload-chunk`, {
-					method: 'POST',
-					body: formData,
-                    credentials: 'include'
-				});
+				try {
+					const uploadResp = await fetch(`${API_BASE_URL}/video/upload-chunk`, {
+						method: 'POST',
+						body: formData,
+						credentials: 'include'
+					});
 
-				const uploadData = await uploadResp.json();
-				if (!uploadData.success) {
-					throw new Error(uploadData.message || `分片 ${index} 上传失败`);
+					const uploadData = await uploadResp.json();
+					if (!uploadData.success) {
+						throw new Error(uploadData.message || `分片 ${index} 上传失败`);
+					}
+
+					this.videoUploadProgress = Math.round(((index + 1) / totalChunks) * 100);
+				} catch (error) {
+					console.error(`分片 ${index} 上传失败:`, error);
+					// 如果上传失败，抛出错误，让调用者处理
+					throw error;
 				}
-
-				this.videoUploadProgress = Math.round(((index + 1) / totalChunks) * 100);
 			}
+			
+			// 所有分片上传完成
+			console.log('所有分片上传完成');
 		},
 		// 暂停视频上传
 		pauseVideoUpload(e) {
@@ -772,6 +829,36 @@ export default {
 			this.videoUploadStatus = 'paused';
 			uni.showToast({
 				title: '上传已暂停',
+				icon: 'none',
+				duration: 1500
+			});
+		},
+		// 取消视频上传
+		cancelVideoUpload(e) {
+			if (e) {
+				e.stopPropagation();
+			}
+			console.log('取消上传被点击');
+			
+			// 设置状态为取消，这会停止上传循环
+			this.videoUploadStatus = 'idle';
+			this.videoUploadPaused = false;
+			
+			// 清理所有上传相关的状态
+			this.videoUploadProgress = 0;
+			this.videoUploadFileHash = '';
+			this.videoUploadBlob = null;
+			this.videoUploadFileName = '';
+			this.videoUploadExt = '';
+			this.videoUploadTotalChunks = 0;
+			this.videoUploadChunkSize = 0;
+			
+			// 清除视频URL（如果已设置）
+			this.articleForm.video = '';
+			
+			uni.hideLoading();
+			uni.showToast({
+				title: '上传已取消',
 				icon: 'none',
 				duration: 1500
 			});
@@ -790,8 +877,11 @@ export default {
 				return;
 			}
 
+			// 先设置状态，避免状态冲突
 			this.videoUploadPaused = false;
 			this.videoUploadStatus = 'uploading';
+			
+
 
 			try {
 				// 重新检查已上传的分片
@@ -815,20 +905,196 @@ export default {
 				}
 
 				const checkInfo = checkData.data || {};
+				
+				// 检查是否文件已经完整上传（秒传）
+				if (checkInfo.alreadyUploaded && checkInfo.url) {
+					console.log('✅ 文件已完整上传（秒传）');
+					let videoUrl = checkInfo.url;
+					if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
+						videoUrl = this.getFullFileUrl(videoUrl);
+					}
+					
+					if (!videoUrl || videoUrl.trim() === '') {
+						throw new Error('视频URL无效');
+					}
+					
+					videoUrl = videoUrl.trim();
+					this.articleForm.video = videoUrl;
+					this.mediaType = 'video';
+					this.videoUploadStatus = 'success';
+					this.videoUploadProgress = 100;
+					
+					// 清理上传状态
+					this.videoUploadFileHash = '';
+					this.videoUploadBlob = null;
+					this.videoUploadFileName = '';
+					this.videoUploadExt = '';
+					this.videoUploadTotalChunks = 0;
+					this.videoUploadChunkSize = 0;
+					
+					uni.hideLoading();
+					uni.showToast({
+						title: '视频已存在，无需重新上传',
+						icon: 'success',
+						duration: 1500
+					});
+					return;
+				}
+				
 				const uploadedChunks = checkInfo.uploadedChunks || [];
 
-				// 继续上传剩余分片
-				await this.uploadChunks(
-					uploadedChunks,
-					this.videoUploadChunkSize,
-					this.videoUploadTotalChunks,
-					this.videoUploadBlob,
-					this.videoUploadFileHash,
-					this.videoUploadFileName,
-					this.videoUploadExt
-				);
+				// 检查是否所有分片都已上传
+				if (uploadedChunks.length === this.videoUploadTotalChunks) {
+					// 所有分片已上传，直接合并
+					console.log('所有分片已上传，直接合并');
+				} else if (uploadedChunks.length === 0) {
+					// 分片列表为空，可能是：
+					// 1. 分片已被删除（合并完成但COS还在上传）
+					// 2. 真的没有分片
+					// 等待一下再检查，可能合并正在进行中
+					console.log('⚠️ 分片列表为空，等待合并完成...');
+					
+					// 等待最多5秒，每500ms检查一次
+					let waitCount = 0;
+					const maxWait = 10; // 10次 * 500ms = 5秒
+					
+					while (waitCount < maxWait) {
+						await new Promise(resolve => setTimeout(resolve, 500));
+						
+						const retryCheckResp = await fetch(`${API_BASE_URL}/video/check`, {
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json'
+							},
+							credentials: 'include',
+							body: JSON.stringify({
+								fileHash: this.videoUploadFileHash,
+								filename: this.videoUploadFileName,
+								size: this.videoUploadBlob.size,
+								ext: this.videoUploadExt
+							})
+						});
+						
+						const retryCheckData = await retryCheckResp.json();
+						if (retryCheckData.success && retryCheckData.data?.alreadyUploaded && retryCheckData.data?.url) {
+							// 文件已上传完成
+							console.log('✅ 等待后检查：文件已上传完成');
+							let videoUrl = retryCheckData.data.url;
+							if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
+								videoUrl = this.getFullFileUrl(videoUrl);
+							}
+							
+							if (!videoUrl || videoUrl.trim() === '') {
+								throw new Error('视频URL无效');
+							}
+							
+							videoUrl = videoUrl.trim();
+							this.articleForm.video = videoUrl;
+							this.mediaType = 'video';
+							this.videoUploadStatus = 'success';
+							this.videoUploadProgress = 100;
+							
+							// 清理上传状态
+							this.videoUploadFileHash = '';
+							this.videoUploadBlob = null;
+							this.videoUploadFileName = '';
+							this.videoUploadExt = '';
+							this.videoUploadTotalChunks = 0;
+							this.videoUploadChunkSize = 0;
+							
+							uni.hideLoading();
+							uni.showToast({
+								title: '视频上传完成',
+								icon: 'success',
+								duration: 1500
+							});
+							return;
+						}
+						
+						waitCount++;
+					}
+					
+					// 等待超时，尝试合并（可能分片已删除但合并正在进行）
+					console.log('⚠️ 等待超时，尝试合并（可能合并正在进行中）...');
+				} else {
+					// 继续上传剩余分片
+					console.log(`继续上传：已上传 ${uploadedChunks.length}/${this.videoUploadTotalChunks} 个分片`);
+					await this.uploadChunks(
+						uploadedChunks,
+						this.videoUploadChunkSize,
+						this.videoUploadTotalChunks,
+						this.videoUploadBlob,
+						this.videoUploadFileHash,
+						this.videoUploadFileName,
+						this.videoUploadExt
+					);
+
+					// 再次检查确保所有分片都已上传
+					const finalCheckResp = await fetch(`${API_BASE_URL}/video/check`, {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json'
+						},
+						credentials: 'include',
+						body: JSON.stringify({
+							fileHash: this.videoUploadFileHash,
+							filename: this.videoUploadFileName,
+							size: this.videoUploadBlob.size,
+							ext: this.videoUploadExt
+						})
+					});
+
+					const finalCheckData = await finalCheckResp.json();
+					if (!finalCheckData.success) {
+						throw new Error('验证上传状态失败');
+					}
+
+					// 检查是否文件已完整上传（可能在验证期间合并完成）
+					if (finalCheckData.data?.alreadyUploaded && finalCheckData.data?.url) {
+						console.log('✅ 验证期间文件已上传完成');
+						let videoUrl = finalCheckData.data.url;
+						if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://')) {
+							videoUrl = this.getFullFileUrl(videoUrl);
+						}
+						
+						if (!videoUrl || videoUrl.trim() === '') {
+							throw new Error('视频URL无效');
+						}
+						
+						videoUrl = videoUrl.trim();
+						this.articleForm.video = videoUrl;
+						this.mediaType = 'video';
+						this.videoUploadStatus = 'success';
+						this.videoUploadProgress = 100;
+						
+						// 清理上传状态
+						this.videoUploadFileHash = '';
+						this.videoUploadBlob = null;
+						this.videoUploadFileName = '';
+						this.videoUploadExt = '';
+						this.videoUploadTotalChunks = 0;
+						this.videoUploadChunkSize = 0;
+						
+						uni.hideLoading();
+						uni.showToast({
+							title: '视频上传完成',
+							icon: 'success',
+							duration: 1500
+						});
+						return;
+					}
+
+					const finalUploadedChunks = finalCheckData.data?.uploadedChunks || [];
+					if (finalUploadedChunks.length !== this.videoUploadTotalChunks) {
+						// 分片不完整，但可能正在合并中，尝试合并
+						console.log(`⚠️ 分片不完整：已上传 ${finalUploadedChunks.length}/${this.videoUploadTotalChunks}，尝试合并...`);
+					} else {
+						console.log(`✅ 所有分片上传完成：${finalUploadedChunks.length}/${this.videoUploadTotalChunks}`);
+					}
+				}
 
 				// 所有分片上传完成 -> 通知服务端合并
+				console.log('开始合并分片...');
 				const mergeResp = await fetch(`${API_BASE_URL}/video/merge`, {
 					method: 'POST',
 					headers: {
@@ -880,10 +1146,11 @@ export default {
 					duration: 1500
 				});
 			} catch (error) {
-				console.error('继续上传失败:', error);
+
 				this.videoUploadStatus = 'error';
+				uni.hideLoading();
 				uni.showToast({
-					title: '继续上传失败，请重试',
+					title: error.message || '继续上传失败，请重试',
 					icon: 'none',
 					duration: 2000
 				});
@@ -1537,7 +1804,7 @@ export default {
 							z-index: 1000;
 							pointer-events: auto;
 							
-							.pause-btn, .resume-btn {
+							.pause-btn, .resume-btn, .cancel-btn {
 								padding: 12rpx 32rpx;
 								border-radius: 30rpx;
 								font-size: 26rpx;
@@ -1551,6 +1818,7 @@ export default {
 								min-width: 120rpx;
 								text-align: center;
 								pointer-events: auto;
+								margin: 0 8rpx;
 								
 								&:active {
 									opacity: 0.7;
@@ -1573,6 +1841,15 @@ export default {
 								
 								&:hover {
 									background-color: #3a80d2;
+								}
+							}
+							
+							.cancel-btn {
+								background-color: #ff3b30;
+								color: #ffffff;
+								
+								&:hover {
+									background-color: #ff2d20;
 								}
 							}
 						}

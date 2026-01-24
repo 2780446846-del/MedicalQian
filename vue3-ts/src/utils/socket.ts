@@ -192,7 +192,14 @@ export function onMessage(callback: (message: any) => void) {
   socketInstance.off('message:receive')
   
   socketInstance.on('message:receive', (message) => {
-    console.log('📨 收到消息:', message)
+    console.log('📨 Socket.IO收到消息事件:', {
+      messageId: message.id || message.messageId,
+      fromUserId: message.fromUserId,
+      toUserId: message.toUserId,
+      content: message.content?.substring(0, 50),
+      type: message.type,
+      fullMessage: message
+    })
     callback(message)
   })
 }
