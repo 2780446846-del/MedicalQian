@@ -2,50 +2,50 @@
   <div class="profile-container">
     <!-- 页面标题 -->
     <div class="page-header">
-      <h2 class="page-title">个人资料</h2>
+      <h2 class="page-title">登录账号信息</h2>
     </div>
 
     <!-- 图片和名字占一行 -->
     <div class="profile-main-section">
       <div class="profile-left">
         <div class="profile-avatar-wrapper">
-          <img :src="doctorInfo.avatar" :alt="doctorInfo.name" class="profile-avatar" />
+          <img :src="accountInfo.avatar || 'https://via.placeholder.com/200x260?text=Avatar'" :alt="accountInfo.username" class="profile-avatar" />
         </div>
         <div class="avatar-buttons">
-          <button class="btn-call">呼叫</button>
-          <button class="btn-chat">聊天</button>
+          <button class="btn-call" @click="handleSecurity">安全设置</button>
+          <button class="btn-chat" @click="handlePassword">修改密码</button>
         </div>
       </div>
       <div class="profile-right">
         <div class="profile-info-main">
           <div class="status-buttons">
-            <button class="status-btn active">在职</button>
-            <button class="status-btn">全职</button>
+            <button class="status-btn active">已激活</button>
+            <button class="status-btn" :class="{ active: accountInfo.isVerified }">{{ accountInfo.isVerified ? '已验证' : '未验证' }}</button>
           </div>
-          <h3 class="doctor-name">{{ doctorInfo.name }}</h3>
-          <p class="doctor-title">{{ doctorInfo.title }}</p>
+          <h3 class="doctor-name">{{ accountInfo.username }}</h3>
+          <p class="doctor-title">{{ accountInfo.role || '普通用户' }}</p>
           <div class="contact-info">
             <div class="contact-item">
-              <span class="contact-icon">📍</span>
-              <span class="contact-text">地址 {{ doctorInfo.address }}</span>
+              <span class="contact-icon">🆔</span>
+              <span class="contact-text">账号ID {{ accountInfo.id }}</span>
             </div>
             <div class="contact-item">
               <span class="contact-icon">📞</span>
-              <span class="contact-text">手机号码 {{ doctorInfo.phone }}</span>
+              <span class="contact-text">手机号码 {{ accountInfo.phone || '未绑定' }}</span>
             </div>
             <div class="contact-item">
               <span class="contact-icon">✉️</span>
-              <span class="contact-text">电子邮件 {{ doctorInfo.email }}</span>
+              <span class="contact-text">电子邮件 {{ accountInfo.email || '未绑定' }}</span>
             </div>
           </div>
         </div>
         <div class="about-card">
           <div class="card-header">
-            <h4 class="card-title">关于</h4>
-            <button class="btn-edit">编辑资料</button>
+            <h4 class="card-title">账号信息</h4>
+            <button class="btn-edit" @click="openEditModal">编辑账号</button>
           </div>
           <div class="card-content">
-            <div class="about-text">文本描述: ************</div>
+            <div class="about-text">账号状态: {{ accountInfo.isVerified ? '已验证' : '未验证' }}<br/>注册时间: {{ accountInfo.registerTime || '未知' }}<br/>最后登录: {{ accountInfo.lastLogin || '未知' }}</div>
           </div>
         </div>
       </div>
@@ -236,6 +236,94 @@
         </div>
       </div>
     </div>
+
+    <!-- 编辑账号信息模态框 -->
+    <div v-if="showEditModal" class="edit-modal-overlay" @click.self="closeEditModal">
+      <div class="edit-modal">
+        <div class="edit-modal-header">
+          <h3>编辑账号信息</h3>
+          <button class="close-btn" @click="closeEditModal">×</button>
+        </div>
+        <div class="edit-modal-body">
+          <form @submit.prevent="saveAccountInfo" class="edit-form">
+            <div class="form-group">
+              <label>用户名</label>
+              <input 
+                type="text" 
+                v-model="editForm.username" 
+                placeholder="请输入用户名"
+                disabled
+                class="form-input disabled"
+              />
+              <span class="form-hint">用户名不可修改</span>
+            </div>
+            
+            <div class="form-group">
+              <label>邮箱</label>
+              <input 
+                type="email" 
+                v-model="editForm.email" 
+                placeholder="请输入邮箱地址"
+                class="form-input"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label>手机号码</label>
+              <input 
+                type="tel" 
+                v-model="editForm.phone" 
+                placeholder="请输入手机号码"
+                class="form-input"
+                maxlength="11"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label>头像URL</label>
+              <input 
+                type="url" 
+                v-model="editForm.avatarUrl" 
+                placeholder="请输入头像图片URL"
+                class="form-input"
+              />
+              <div v-if="editForm.avatarUrl" class="avatar-preview">
+                <img :src="editForm.avatarUrl" alt="头像预览" @error="handleImageError" />
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label>昵称</label>
+              <input 
+                type="text" 
+                v-model="editForm.nickname" 
+                placeholder="请输入昵称"
+                class="form-input"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label>性别</label>
+              <select v-model="editForm.gender" class="form-input">
+                <option value="保密">保密</option>
+                <option value="男">男</option>
+                <option value="女">女</option>
+              </select>
+            </div>
+          </form>
+        </div>
+        <div class="edit-modal-footer">
+          <button class="btn-cancel" @click="closeEditModal">取消</button>
+          <button 
+            class="btn-save" 
+            @click="saveAccountInfo"
+            :disabled="isSaving"
+          >
+            {{ isSaving ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -245,15 +333,210 @@ import { useAuthStore } from '../stores/auth'
 
 const authStore = useAuthStore()
 
-// 医生个人信息
-const doctorInfo = ref({
-  name: '陈**',
-  title: '全科医生',
-  avatar: 'https://ts1.tc.mm.bing.net/th/id/OIP-C.A82NfW0r1TjsMAeSpGYqtQAAAA?w=160&h=211&c=8&rs=1&qlt=90&o=6&dpr=1.7&pid=3.1&rm=2',
-  address: '**省**市**区****路568号',
-  phone: '138********',
-  email: 'shenduye**@gmail.com'
+// 登录账号信息
+const accountInfo = computed(() => {
+  const user = authStore.userInfo
+  if (!user) {
+    return {
+      id: '未登录',
+      username: '未登录',
+      email: '',
+      avatar: '',
+      role: '游客',
+      phone: '',
+      isVerified: false,
+      registerTime: '',
+      lastLogin: ''
+    }
+  }
+  
+  // 从 localStorage 获取额外信息（如果有）
+  const storedInfo = localStorage.getItem('sso_user_info')
+  let additionalInfo: any = {}
+  if (storedInfo) {
+    try {
+      additionalInfo = JSON.parse(storedInfo)
+    } catch (e) {
+      console.error('解析用户信息失败:', e)
+    }
+  }
+  
+  return {
+    id: user.id || '未知',
+    username: user.username || '未知用户',
+    email: user.email || additionalInfo.email || '',
+    avatar: user.avatar || additionalInfo.avatar || '',
+    role: typeof user.role === 'string' ? user.role : (user.role?.name || '普通用户'),
+    phone: additionalInfo.phone || '',
+    isVerified: additionalInfo.isVerified !== undefined ? additionalInfo.isVerified : true,
+    registerTime: additionalInfo.registerTime || additionalInfo.createdAt || '',
+    lastLogin: additionalInfo.lastLogin || additionalInfo.lastLoginTime || ''
+  }
 })
+
+// 处理安全设置
+const handleSecurity = () => {
+  alert('安全设置功能开发中...')
+}
+
+// 处理修改密码
+const handlePassword = () => {
+  alert('修改密码功能开发中...')
+}
+
+// 编辑账号信息相关
+const showEditModal = ref(false)
+const isSaving = ref(false)
+const editForm = ref({
+  username: '',
+  email: '',
+  phone: '',
+  avatarUrl: '',
+  nickname: '',
+  gender: '保密'
+})
+
+// 打开编辑模态框
+const openEditModal = () => {
+  const user = authStore.userInfo
+  const storedInfo = localStorage.getItem('sso_user_info')
+  let additionalInfo: any = {}
+  if (storedInfo) {
+    try {
+      additionalInfo = JSON.parse(storedInfo)
+    } catch (e) {
+      console.error('解析用户信息失败:', e)
+    }
+  }
+  
+  editForm.value = {
+    username: user?.username || '',
+    email: user?.email || additionalInfo.email || '',
+    phone: additionalInfo.phone || '',
+    avatarUrl: user?.avatar || additionalInfo.avatarUrl || additionalInfo.avatar || '',
+    nickname: additionalInfo.nickname || '',
+    gender: additionalInfo.gender || '保密'
+  }
+  showEditModal.value = true
+}
+
+// 关闭编辑模态框
+const closeEditModal = () => {
+  showEditModal.value = false
+  isSaving.value = false
+}
+
+// 处理图片加载错误
+const handleImageError = (e: Event) => {
+  const img = e.target as HTMLImageElement
+  img.style.display = 'none'
+}
+
+// 获取API基础URL
+const getApiBaseUrlForEdit = (): string => {
+  let apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+  if (!apiBaseUrl) {
+    apiBaseUrl = 'http://localhost:3000/api'
+  } else {
+    apiBaseUrl = apiBaseUrl.replace(':3001', ':3000')
+  }
+  return apiBaseUrl
+}
+
+// 保存账号信息
+const saveAccountInfo = async () => {
+  if (isSaving.value) return
+  
+  try {
+    isSaving.value = true
+    
+    // 准备要发送的数据
+    const updateData: any = {}
+    
+    if (editForm.value.email !== undefined) {
+      updateData.email = editForm.value.email.trim()
+    }
+    if (editForm.value.phone !== undefined) {
+      updateData.phone = editForm.value.phone.trim()
+    }
+    if (editForm.value.avatarUrl !== undefined) {
+      updateData.avatarUrl = editForm.value.avatarUrl.trim()
+    }
+    if (editForm.value.nickname !== undefined) {
+      updateData.nickname = editForm.value.nickname.trim()
+    }
+    if (editForm.value.gender !== undefined) {
+      updateData.gender = editForm.value.gender
+    }
+    
+    const apiBaseUrl = getApiBaseUrlForEdit()
+    const response = await fetch(`${apiBaseUrl}/auth/me`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authStore.getToken()}`,
+      },
+      body: JSON.stringify(updateData),
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.message || '保存失败')
+    }
+    
+    const result = await response.json()
+    
+    if (result.success && result.data) {
+      // 更新 authStore 中的用户信息
+      if (authStore.userInfo) {
+        // 更新用户信息，保留原有字段
+        const updatedUserInfo = {
+          ...authStore.userInfo,
+          email: result.data.email !== undefined ? result.data.email : authStore.userInfo.email,
+          avatar: result.data.avatarUrl !== undefined ? result.data.avatarUrl : authStore.userInfo.avatar
+        }
+        authStore.userInfo = updatedUserInfo
+      }
+      
+      // 更新 localStorage 中的用户信息
+      const storedInfo = localStorage.getItem('sso_user_info')
+      if (storedInfo) {
+        try {
+          const parsed = JSON.parse(storedInfo)
+          const updated = {
+            ...parsed,
+            email: result.data.email !== undefined ? result.data.email : parsed.email,
+            avatarUrl: result.data.avatarUrl !== undefined ? result.data.avatarUrl : parsed.avatarUrl,
+            avatar: result.data.avatarUrl !== undefined ? result.data.avatarUrl : parsed.avatar,
+            phone: result.data.phone !== undefined ? result.data.phone : parsed.phone,
+            nickname: result.data.nickname !== undefined ? result.data.nickname : parsed.nickname,
+            gender: result.data.gender !== undefined ? result.data.gender : parsed.gender
+          }
+          localStorage.setItem('sso_user_info', JSON.stringify(updated))
+        } catch (e) {
+          console.error('更新本地存储失败:', e)
+        }
+      } else {
+        // 如果没有存储信息，直接保存返回的数据
+        localStorage.setItem('sso_user_info', JSON.stringify(result.data))
+      }
+      
+      alert('账号信息已更新！')
+      closeEditModal()
+      
+      // 刷新页面数据（通过重新计算 accountInfo）
+      // accountInfo 是 computed，会自动更新
+    } else {
+      throw new Error(result.message || '保存失败')
+    }
+  } catch (error) {
+    console.error('保存账号信息失败:', error)
+    const errorMsg = error instanceof Error ? error.message : '保存失败，请重试'
+    alert(errorMsg)
+  } finally {
+    isSaving.value = false
+  }
+}
 
 // 工作时长相关
 const workStartTime = ref<number | null>(null)
@@ -1791,6 +2074,157 @@ const attendanceDays = ref(['周一', '周二', '周三', '周四', '周五'])
   .camera-modal-header,
   .camera-modal-body,
   .camera-modal-footer {
+    padding: 16px;
+  }
+}
+
+/* 编辑账号信息模态框样式 */
+.edit-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.edit-modal {
+  background: #fff;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.edit-modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.edit-modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.edit-modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.form-input {
+  padding: 10px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #1d2129;
+  transition: all 0.2s;
+  background: #fff;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+}
+
+.form-input.disabled {
+  background: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: #999;
+}
+
+.avatar-preview {
+  margin-top: 8px;
+  width: 100px;
+  height: 100px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e0e0e0;
+}
+
+.avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.edit-modal-footer {
+  padding: 20px 24px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.btn-save {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #4CAF50;
+  color: #fff;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #45a049;
+}
+
+.btn-save:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 768px) {
+  .edit-modal {
+    width: 95%;
+    margin: 20px;
+  }
+
+  .edit-modal-header,
+  .edit-modal-body,
+  .edit-modal-footer {
     padding: 16px;
   }
 }

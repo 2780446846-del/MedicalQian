@@ -15,6 +15,8 @@ import {
 } from '@/utils/socket'
 import { useAuthStore } from '@/stores/auth'
 import getCallManager from '@/utils/callManager'
+import EmojiPicker from 'vue3-emoji-picker'
+import 'vue3-emoji-picker/css'
 
 interface PatientCardData {
   patientInfo: {
@@ -53,6 +55,10 @@ const showImagePreview = ref(false)
 const previewImageUrl = ref('')
 const previewImageList = ref<string[]>([])
 const previewCurrentIndex = ref(0)
+
+// 表情选择器相关
+const showEmojiPicker = ref(false)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
 // 通话相关状态
 const isInCall = ref(false)
@@ -203,6 +209,23 @@ onMounted(async () => {
     }
     setTimeout(checkAndSetDuty, 1000)
   }
+  
+  // 设置点击外部关闭表情选择器
+  handleClickOutside = (event: MouseEvent) => {
+    const target = event.target as HTMLElement
+    const emojiPicker = document.querySelector('.emoji-picker-container')
+    const emojiBtn = document.querySelector('.emoji-btn')
+    
+    if (showEmojiPicker.value && 
+        emojiPicker && 
+        !emojiPicker.contains(target) && 
+        emojiBtn && 
+        !emojiBtn.contains(target)) {
+      closeEmojiPicker()
+    }
+  }
+  
+  document.addEventListener('click', handleClickOutside)
 })
 
 onUnmounted(() => {
@@ -227,6 +250,12 @@ onUnmounted(() => {
   
   // 清理通话资源
   cleanupCallManager()
+  
+  // 移除点击外部关闭表情选择器的事件监听
+  if (handleClickOutside) {
+    document.removeEventListener('click', handleClickOutside)
+    handleClickOutside = null
+  }
 })
 
 /**
@@ -458,7 +487,11 @@ function handleReceiveMessage(message: any) {
   const isPatientMessage = message.fromUserId && !message.fromUserId.startsWith('doctor_')
   
   // 判断是否应该接收此消息
-  // 核心逻辑：如果医生在岗，且消息来自患者，就应该接收（无论toUserId是什么）
+  // 核心逻辑：
+  // 1. 消息直接发送给当前医生（toUserId === doctor.id）
+  // 2. 消息发送给任意医生（toUserId以'doctor_'开头）且医生在岗
+  // 3. 消息来自当前选中的患者
+  // 4. 消息来自患者且医生在岗（无论toUserId是什么，因为后端可能已经路由到当前医生）
   const shouldReceiveMessage = isMessageForCurrentDoctor || 
     (isMessageToAnyDoctor && isOnDuty.value) || 
     isMessageFromSelectedPatient || 
@@ -490,10 +523,13 @@ function handleReceiveMessage(message: any) {
     if (message.fromUserId && !message.fromUserId.startsWith('doctor_')) {
       const patient = patientList.value.find(p => p.id === message.fromUserId)
       if (patient) {
-        patientInfo.value = {
-          name: patient.name,
-          avatar: patient.avatar || '👤',
-          id: patient.id
+        // 如果当前选中的患者不是消息发送者，只更新患者列表，不更新当前聊天窗口
+        if (selectedPatientId.value === message.fromUserId) {
+          patientInfo.value = {
+            name: patient.name,
+            avatar: patient.avatar || '👤',
+            id: patient.id
+          }
         }
         // 确保患者在线状态已更新
         if (!patient.isOnline) {
@@ -507,6 +543,20 @@ function handleReceiveMessage(message: any) {
           isOnline: true
         })
       }
+    }
+    
+    // 关键：只有当消息来自当前选中的患者时，才添加到当前聊天窗口
+    // 如果消息来自其他患者，只更新患者列表，不显示在当前聊天窗口
+    if (message.fromUserId && message.fromUserId !== selectedPatientId.value) {
+      console.log('ℹ️ 消息来自其他患者，只更新患者列表，不显示在当前聊天窗口', {
+        fromUserId: message.fromUserId,
+        selectedPatientId: selectedPatientId.value
+      })
+      // 更新最后拉取时间戳（即使不显示，也要更新，避免重复拉取）
+      if (message.timestamp) {
+        lastPullTimestamp = Math.max(lastPullTimestamp, message.timestamp)
+      }
+      return // 不添加到当前聊天窗口
     }
     
     const chatMessage: Message = {
@@ -526,7 +576,10 @@ function handleReceiveMessage(message: any) {
     addMessage(chatMessage)
     
     // 新消息到达后自动拉取最新历史，确保与后端一致（防抖）
-    reloadMessagesDebounced()
+    // 但只在消息来自当前选中患者时才拉取，避免重复
+    if (message.fromUserId === selectedPatientId.value) {
+      reloadMessagesDebounced()
+    }
     
     // 清空未读计数（因为正在查看）
     const patient = patientList.value.find(p => p.id === message.fromUserId)
@@ -709,6 +762,189 @@ const handleKeyPress = (e: KeyboardEvent) => {
     sendChatMessage()
   }
 }
+
+// 选择图片（医生端）
+function chooseImages() {
+  if (!isSocketConnected()) {
+    alert('未连接，请稍候...')
+    return
+  }
+
+  if (!selectedPatientId.value) {
+    alert('请先选择患者')
+    return
+  }
+
+  // 创建文件输入元素
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/*'
+  input.multiple = true
+  input.style.display = 'none'
+  
+  // 清理函数
+  const cleanup = () => {
+    if (input.parentNode) {
+      input.parentNode.removeChild(input)
+    }
+  }
+  
+  input.onchange = async (e: Event) => {
+    const target = e.target as HTMLInputElement
+    const files = target.files
+    if (!files || files.length === 0) {
+      cleanup()
+      return
+    }
+
+    // 处理每个选中的图片
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (file.type.startsWith('image/')) {
+        await sendImageMessage(file)
+      }
+    }
+
+    // 清理
+    cleanup()
+  }
+
+  // 监听取消事件（某些浏览器可能不支持）
+  input.oncancel = () => {
+    cleanup()
+  }
+
+  // 添加到DOM并触发点击
+  document.body.appendChild(input)
+  input.click()
+  
+  // 延迟清理（防止某些浏览器不触发onchange）
+  setTimeout(() => {
+    if (input.parentNode) {
+      cleanup()
+    }
+  }, 1000)
+}
+
+// 发送图片消息（医生端）
+async function sendImageMessage(file: File) {
+  if (!isSocketConnected()) {
+    return
+  }
+
+  try {
+    // 将图片转换为base64
+    const base64Image = await convertFileToBase64(file)
+    
+    // 先添加到本地消息列表（乐观更新）
+    const doctor = doctorInfo.value
+    const doctorMessage: Message = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      content: base64Image,
+      sender: 'doctor',
+      senderName: doctor.name,
+      avatar: doctor.avatar,
+      timestamp: Date.now(),
+      type: 'image',
+      imageUrl: base64Image
+    }
+    addMessage(doctorMessage)
+    
+    // 滚动到底部
+    scrollToBottom()
+    
+    // 通过 Socket.IO 发送图片消息给患者
+    console.log('📤 医生端发送图片消息:', {
+      fromUserId: doctor.id,
+      toUserId: patientInfo.value.id,
+      imageSize: base64Image.length
+    })
+    
+    const result = await sendMessage(patientInfo.value.id, base64Image, 'image')
+    
+    // 更新消息ID为服务器返回的ID（如果有）
+    if (result && result.messageId) {
+      const lastMessage = messages.value[messages.value.length - 1]
+      if (lastMessage && lastMessage.sender === 'doctor' && lastMessage.type === 'image') {
+        lastMessage.id = result.messageId
+        lastMessage.timestamp = result.timestamp || lastMessage.timestamp
+      }
+    }
+    
+    // 发送成功后，从后端重新加载最新消息，确保数据同步
+    try {
+      await reloadMessagesFromServer()
+    } catch (reloadError) {
+      console.warn('⚠️ 重新加载消息失败（不影响发送）:', reloadError)
+    }
+    
+    console.log('✅ 图片消息发送成功（医生 -> 患者），已保存到后端')
+  } catch (error: any) {
+    console.error('发送图片消息失败:', error)
+    alert(error.message || '发送图片失败，请重试')
+    // 移除刚才添加的消息
+    const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null
+    if (lastMessage && lastMessage.sender === 'doctor' && lastMessage.type === 'image') {
+      const index = messages.value.indexOf(lastMessage)
+      if (index > -1) {
+        messages.value.splice(index, 1)
+      }
+    }
+  }
+}
+
+// 将文件转换为base64
+function convertFileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result)
+    }
+    reader.onerror = () => {
+      reject(new Error('读取文件失败'))
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+// 切换表情选择器显示/隐藏
+function toggleEmojiPicker() {
+  showEmojiPicker.value = !showEmojiPicker.value
+}
+
+// 关闭表情选择器
+function closeEmojiPicker() {
+  showEmojiPicker.value = false
+}
+
+// 选择表情后的处理
+function onSelectEmoji(emoji: any) {
+  if (emoji && emoji.i) {
+    // 将表情插入到输入框当前光标位置
+    const textarea = textareaRef.value
+    if (textarea) {
+      const start = textarea.selectionStart || 0
+      const end = textarea.selectionEnd || 0
+      const textBefore = inputText.value.substring(0, start)
+      const textAfter = inputText.value.substring(end)
+      inputText.value = textBefore + emoji.i + textAfter
+      
+      // 设置光标位置到插入表情后
+      nextTick(() => {
+        const newPosition = start + emoji.i.length
+        textarea.setSelectionRange(newPosition, newPosition)
+        textarea.focus()
+      })
+    } else {
+      // 如果没有焦点，直接追加到末尾
+      inputText.value += emoji.i
+    }
+  }
+}
+
+// 点击外部关闭表情选择器的处理函数
+let handleClickOutside: ((event: MouseEvent) => void) | null = null
 
 // 预览图片
 const previewImage = (imageUrl: string | undefined, allImages?: string[]) => {
@@ -1253,37 +1489,68 @@ async function selectPatient(patient: Patient) {
       doctorId: doctor.id,
       patientName: patient.name
     })
-    const response = await fetch(`http://localhost:3000/api/chat/consultation?patientId=${patient.id}&doctorId=${doctor.id}`)
-    if (!response.ok) {
-      throw new Error(`HTTP错误: ${response.status} ${response.statusText}`)
-    }
-    const result = await response.json()
-    console.log('📦 历史消息API响应:', {
-      success: result.success,
-      hasConsultation: !!result.data?.consultation,
-      messageCount: result.data?.messages?.length || 0
-    })
     
-    if (result.success && result.data) {
-      const consultation = result.data.consultation
-      const historyMessages = result.data.messages || []
-      
-      // 更新患者信息（使用数据库中的真实信息）
-      if (consultation && consultation.patientInfo) {
-        patientInfo.value = {
-          name: consultation.patientInfo.name || patient.name,
-          avatar: consultation.patientInfo.avatar || patient.avatar || '👤',
-          id: patient.id
-        }
-        
-        // 更新患者列表中的信息
-        updatePatientInList(patient.id, {
-          name: consultation.patientInfo.name,
-          avatar: consultation.patientInfo.avatar
+    let historyMessages: any[] = []
+    let consultation: any = null
+    
+    // 首先尝试从咨询接口获取历史消息
+    try {
+      const response = await fetch(`http://localhost:3000/api/chat/consultation?patientId=${patient.id}&doctorId=${doctor.id}`)
+      if (response.ok) {
+        const result = await response.json()
+        console.log('📦 咨询接口API响应:', {
+          success: result.success,
+          hasConsultation: !!result.data?.consultation,
+          messageCount: result.data?.messages?.length || 0
         })
+        
+        if (result.success && result.data) {
+          consultation = result.data.consultation
+          historyMessages = result.data.messages || []
+          
+          // 更新患者信息（使用数据库中的真实信息）
+          if (consultation && consultation.patientInfo) {
+            patientInfo.value = {
+              name: consultation.patientInfo.name || patient.name,
+              avatar: consultation.patientInfo.avatar || patient.avatar || '👤',
+              id: patient.id
+            }
+            
+            // 更新患者列表中的信息
+            updatePatientInList(patient.id, {
+              name: consultation.patientInfo.name,
+              avatar: consultation.patientInfo.avatar
+            })
+          }
+        }
       }
-      
-      // 加载历史消息，并按时间戳排序（最早的在前，最新的在后）
+    } catch (err) {
+      console.warn('⚠️ 从咨询接口加载历史消息失败，尝试从历史消息接口加载:', err)
+    }
+    
+    // 如果咨询接口没有返回消息，尝试从历史消息接口加载
+    if (historyMessages.length === 0) {
+      try {
+        console.log('🔄 从历史消息接口加载消息...')
+        const historyResponse = await fetch(`http://localhost:3000/api/chat/history?userId=${patient.id}&targetId=${doctor.id}&limit=200`)
+        if (historyResponse.ok) {
+          const historyResult = await historyResponse.json()
+          console.log('📦 历史消息接口API响应:', {
+            success: historyResult.success,
+            messageCount: historyResult.messages?.length || 0
+          })
+          
+          if (historyResult.success && historyResult.messages && historyResult.messages.length > 0) {
+            historyMessages = historyResult.messages
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ 从历史消息接口加载失败:', err)
+      }
+    }
+    
+    // 处理历史消息，并按时间戳排序（最早的在前，最新的在后）
+    if (historyMessages.length > 0) {
       const sortedMessages = historyMessages
         .map((msg: any) => {
           // 使用医生ID准确判断消息发送者（确保医生消息显示在右侧）
@@ -1307,7 +1574,7 @@ async function selectPatient(patient: Patient) {
       
       messages.value = sortedMessages
       
-      console.log('✅ 加载历史消息:', {
+      console.log('✅ 加载历史消息成功:', {
         count: sortedMessages.length,
         patientId: patient.id,
         doctorId: doctor.id,
@@ -1325,6 +1592,7 @@ async function selectPatient(patient: Patient) {
       })
     } else {
       // 如果没有历史记录，清空消息列表
+      console.log('ℹ️ 没有找到历史消息')
       messages.value = []
     }
   } catch (error) {
@@ -1922,9 +2190,16 @@ function cleanupCallManager() {
           <button class="call-btn" @click="startAudioCall" title="语音通话" :disabled="!selectedPatientId || !isConnected">
             📞
           </button>
+          <button class="call-btn album-btn" @click="chooseImages" title="相册" :disabled="!selectedPatientId || !isConnected">
+            📷
+          </button>
+          <button class="call-btn emoji-btn" @click="toggleEmojiPicker" title="表情" :disabled="!selectedPatientId || !isConnected">
+            😊
+          </button>
         </div>
         <div class="input-wrapper">
           <textarea
+            ref="textareaRef"
             v-model="inputText"
             class="chat-input"
             placeholder="输入消息..."
@@ -1943,6 +2218,14 @@ function cleanupCallManager() {
           >
             发送
           </button>
+          <!-- 表情选择器 -->
+          <div v-if="showEmojiPicker" class="emoji-picker-container">
+            <EmojiPicker 
+              :native="true" 
+              @select="onSelectEmoji"
+              :theme="'light'"
+            />
+          </div>
         </div>
         <div class="input-tips">
           <span>按 Enter 发送，Shift + Enter 换行</span>
@@ -2682,6 +2965,7 @@ function cleanupCallManager() {
   display: flex;
   gap: 12px;
   align-items: flex-end;
+  position: relative;
 }
 
 .chat-input {
@@ -3028,6 +3312,26 @@ function cleanupCallManager() {
 .call-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.album-btn {
+  /* 相册按钮样式与通话按钮一致 */
+}
+
+.emoji-btn {
+  /* 表情按钮样式与通话按钮一致 */
+}
+
+.emoji-picker-container {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 8px;
+  z-index: 1000;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
 }
 
 /* 通话界面样式 */
