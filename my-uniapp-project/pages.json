@@ -172,6 +172,42 @@
       }
     },
     {
+      "path": "pages/doctor/live",
+      "style": {
+        "navigationBarTitleText": "医生直播",
+        "backgroundColor": "#000000",
+        "navigationBarBackgroundColor": "#000000",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/viewer/live",
+      "style": {
+        "navigationBarTitleText": "观看直播",
+        "backgroundColor": "#000000",
+        "navigationBarBackgroundColor": "#000000",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/live/list",
+      "style": {
+        "navigationBarTitleText": "直播间列表",
+        "backgroundColor": "#667eea",
+        "navigationBarBackgroundColor": "#667eea",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/live/entrance",
+      "style": {
+        "navigationBarTitleText": "医生直播",
+        "backgroundColor": "#667eea",
+        "navigationBarBackgroundColor": "#667eea",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
       "path": "pages/doctor/articles",
       "style": {
         "navigationBarTitleText": "医生文章",

@@ -461,10 +461,15 @@ export default {
         // 只有在真正的网络错误（超时、连接失败等）时才显示错误信息
         if (error.errMsg) {
           if (error.errMsg.includes('timeout') || error.errMsg.includes('超时')) {
-            this.errorMessage = '连接服务器超时,点击屏幕重试';
+            // 获取API地址用于提示
+            const { API_BASE_URL } = await import('@/utils/config.js');
+            const baseUrl = API_BASE_URL.replace('/api', '');
+            this.errorMessage = `连接服务器超时\n\n请检查：\n1. 后端服务是否运行\n   地址：${baseUrl}\n2. 网络连接是否正常\n\n点击屏幕重试`;
           } else if (error.errMsg.includes('fail') && !error.errMsg.includes('401')) {
             // 排除401错误，因为401已经在上面处理了
-            this.errorMessage = '连接服务器失败,点击屏幕重试';
+            const { API_BASE_URL } = await import('@/utils/config.js');
+            const baseUrl = API_BASE_URL.replace('/api', '');
+            this.errorMessage = `连接服务器失败\n\n请检查：\n1. 后端服务是否启动\n   地址：${baseUrl}\n2. 网络连接是否正常\n\n点击屏幕重试`;
           } else {
             // 其他错误，不显示错误信息，使用本地数据
             console.log('ℹ️ 其他错误，使用本地数据');
@@ -2858,6 +2863,8 @@ export default {
   cursor: pointer;
   user-select: none;
   margin-top: 20rpx;
+  white-space: pre-line; /* 支持多行文本显示 */
+  line-height: 1.6; /* 增加行高，提高可读性 */
 }
 
 .error-message:active {
