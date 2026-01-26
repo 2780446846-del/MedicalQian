@@ -241,10 +241,9 @@
       </view>
     </view>
 
+    <!-- 主题切换按钮 -->
+    <ThemeToggle />
   </view>
-  
-  <!-- 主题切换按钮 -->
-  <ThemeToggle />
 </template>
 
 <script setup lang="ts">
