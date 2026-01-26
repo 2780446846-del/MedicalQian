@@ -24,19 +24,34 @@
       </view>
     </view>
 
-    <!-- 橙色促销横幅 -->
+    <!-- 橙色促销横幅（拆分为问诊+直播两部分） -->
     <view class="promo-banner">
-      <view class="banner-content">
-        <view class="banner-text">
-          <view class="banner-title">随时随地问医生</view>
-          <view class="banner-subtitle">三甲专家 5分钟快速回复</view>
-          <view class="banner-desc">互联网医院 24小时在线</view>
+      <!-- 上半部分：随时随地问医生 -->
+      <view class="banner-main">
+        <view class="banner-content">
+          <view class="banner-text">
+            <view class="banner-title">随时随地问医生</view>
+            <view class="banner-subtitle">三甲专家 5分钟快速回复</view>
+            <view class="banner-desc">互联网医院 24小时在线</view>
+          </view>
+          <button class="consult-btn" @click="handleConsult">立即咨询</button>
         </view>
-        <button class="consult-btn" @click="handleConsult">立即咨询</button>
+        <view class="banner-image">
+          <!-- 医生图片占位 -->
+          <view class="doctor-placeholder">👩‍⚕️</view>
+        </view>
       </view>
-      <view class="banner-image">
-        <!-- 医生图片占位 -->
-        <view class="doctor-placeholder">👩‍⚕️</view>
+
+      <!-- 下半部分：医生直播入口 -->
+      <view class="live-banner" @click="handleLiveStream">
+        <view class="live-info">
+          <view class="live-title">医生直播</view>
+          <view class="live-subtitle">名医实时讲解，在线答疑</view>
+        </view>
+        <view class="live-status">
+          <view class="live-dot"></view>
+          <text class="live-status-text">直播中</text>
+        </view>
       </view>
     </view>
 
@@ -485,6 +500,13 @@ const handleConsult = () => {
   })
 }
 
+// 医生直播 - 跳转到直播入口页面
+const handleLiveStream = () => {
+  uni.navigateTo({
+    url: '/pages/live/entrance'
+  })
+}
+
 // 预约挂号
 const handleAppointment = () => {
   uni.navigateTo({
@@ -834,9 +856,16 @@ function onShow() {
   position: relative;
   overflow: hidden;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 24rpx;
   
+  .banner-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20rpx;
+  }
+
   .banner-content {
     flex: 1;
     z-index: 2;
@@ -885,6 +914,70 @@ function onShow() {
       font-size: 120rpx;
       opacity: 0.3;
     }
+  }
+
+  // 医生直播入口样式
+  .live-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20rpx 28rpx;
+    border-radius: 20rpx;
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(6rpx);
+    border: 2rpx solid rgba(255, 255, 255, 0.25);
+  }
+
+  .live-info {
+    display: flex;
+    flex-direction: column;
+    gap: 8rpx;
+  }
+
+  .live-title {
+    font-size: 32rpx;
+    font-weight: bold;
+    color: #ffffff;
+  }
+
+  .live-subtitle {
+    font-size: 24rpx;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .live-status {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
+  }
+
+  .live-dot {
+    width: 18rpx;
+    height: 18rpx;
+    border-radius: 50%;
+    background: #ff4d4f;
+    box-shadow: 0 0 12rpx rgba(255, 77, 79, 0.9);
+    animation: live-pulse 1.4s infinite ease-in-out;
+  }
+
+  .live-status-text {
+    font-size: 24rpx;
+    color: #ffffff;
+  }
+}
+
+@keyframes live-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(1.35);
+    opacity: 0.2;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
   }
 }
 

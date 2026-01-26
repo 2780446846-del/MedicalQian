@@ -1,0 +1,20 @@
+{
+  "name": "webrtc-signal-server",
+  "version": "1.0.0",
+  "description": "WebRTC 信令服务器",
+  "main": "webrtc-signal-server.js",
+  "scripts": {
+    "start": "node webrtc-signal-server.js",
+    "dev": "nodemon webrtc-signal-server.js"
+  },
+  "keywords": ["webrtc", "signal", "websocket"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+

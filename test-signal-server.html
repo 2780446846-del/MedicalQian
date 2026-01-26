@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC 信令服务器测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        
+        .status {
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+            border: 2px solid #ffc107;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #28a745;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #dc3545;
+        }
+        
+        .icon {
+            font-size: 24px;
+        }
+        
+        .input-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .log {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .log-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .log-item {
+            padding: 8px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .log-item.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .log-item.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .log-item.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top-color: #856404;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+        }
+        
+        .info-box h3 {
+            color: #1976D2;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        
+        .info-box ul {
+            margin-left: 20px;
+            color: #555;
+        }
+        
+        .info-box li {
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 WebRTC 信令服务器测试</h1>
+        <p class="subtitle">测试 WebSocket 连接是否正常</p>
+        
+        <div id="status" class="status connecting">
+            <span class="spinner"></span>
+            <span>准备连接...</span>
+        </div>
+        
+        <div class="input-group">
+            <label for="serverUrl">信令服务器地址</label>
+            <input 
+                type="text" 
+                id="serverUrl" 
+                value="ws://localhost:3000/webrtc-signal"
+                placeholder="ws://localhost:3000/webrtc-signal"
+            >
+        </div>
+        
+        <button id="connectBtn" onclick="connect()">连接服务器</button>
+        
+        <div class="log">
+            <div class="log-title">📋 连接日志</div>
+            <div id="logContainer"></div>
+        </div>
+        
+        <div class="info-box">
+            <h3>💡 使用说明</h3>
+            <ul>
+                <li>确保已启动信令服务器（运行 <code>npm start</code>）</li>
+                <li>默认地址：<code>ws://localhost:3000/webrtc-signal</code></li>
+                <li>如果连接成功，说明服务器运行正常</li>
+                <li>如果连接失败，请检查服务器是否启动</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        let ws = null;
+        const statusEl = document.getElementById('status');
+        const logContainer = document.getElementById('logContainer');
+        const connectBtn = document.getElementById('connectBtn');
+        const serverUrlInput = document.getElementById('serverUrl');
+        
+        function addLog(message, type = 'info') {
+            const logItem = document.createElement('div');
+            logItem.className = `log-item ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            logItem.textContent = `[${timestamp}] ${message}`;
+            logContainer.appendChild(logItem);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        
+        function updateStatus(message, type) {
+            statusEl.className = `status ${type}`;
+            
+            let icon = '⏳';
+            if (type === 'connected') icon = '✅';
+            if (type === 'error') icon = '❌';
+            if (type === 'connecting') icon = '<span class="spinner"></span>';
+            
+            statusEl.innerHTML = `
+                <span class="icon">${icon}</span>
+                <span>${message}</span>
+            `;
+        }
+        
+        function connect() {
+            const serverUrl = serverUrlInput.value.trim();
+            
+            if (!serverUrl) {
+                addLog('请输入服务器地址', 'error');
+                return;
+            }
+            
+            // 关闭旧连接
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            addLog(`正在连接: ${serverUrl}`, 'info');
+            updateStatus('正在连接...', 'connecting');
+            connectBtn.disabled = true;
+            
+            try {
+                ws = new WebSocket(serverUrl);
+                
+                ws.onopen = () => {
+                    addLog('✅ WebSocket 连接成功！', 'success');
+                    updateStatus('连接成功', 'connected');
+                    connectBtn.textContent = '断开连接';
+                    connectBtn.disabled = false;
+                    connectBtn.onclick = disconnect;
+                    
+                    // 测试发送消息
+                    const testMessage = {
+                        type: 'ping',
+                        timestamp: Date.now()
+                    };
+                    ws.send(JSON.stringify(testMessage));
+                    addLog('发送测试消息: ping', 'info');
+                };
+                
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        addLog(`收到消息: ${data.type || 'unknown'}`, 'success');
+                        console.log('收到消息:', data);
+                    } catch (e) {
+                        addLog(`收到消息: ${event.data}`, 'info');
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    addLog('❌ WebSocket 连接错误', 'error');
+                    console.error('WebSocket error:', error);
+                    updateStatus('连接失败', 'error');
+                    connectBtn.disabled = false;
+                };
+                
+                ws.onclose = (event) => {
+                    addLog(`连接已关闭 (code: ${event.code})`, 'info');
+                    updateStatus('连接已断开', 'error');
+                    connectBtn.textContent = '连接服务器';
+                    connectBtn.disabled = false;
+                    connectBtn.onclick = connect;
+                    ws = null;
+                };
+                
+            } catch (error) {
+                addLog(`❌ 连接失败: ${error.message}`, 'error');
+                updateStatus('连接失败', 'error');
+                connectBtn.disabled = false;
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                addLog('正在断开连接...', 'info');
+                ws.close();
+            }
+        }
+        
+        // 页面加载时自动连接
+        window.addEventListener('load', () => {
+            addLog('页面加载完成', 'info');
+            addLog('准备测试连接...', 'info');
+            setTimeout(connect, 500);
+        });
+    </script>
+</body>
+</html>
+
