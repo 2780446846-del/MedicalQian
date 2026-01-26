@@ -264,14 +264,22 @@ export default {
         return '医生'
       }
       
-      // 优先使用后端返回的医生信息
-      if (consultation.doctorInfo && consultation.doctorInfo.name) {
-        return consultation.doctorInfo.name
+      // 优先使用后端返回的医生信息（包括name、username等字段）
+      if (consultation.doctorInfo && typeof consultation.doctorInfo === 'object') {
+        // 尝试多个可能的字段名
+        const doctorName = consultation.doctorInfo.name || 
+                          consultation.doctorInfo.username || 
+                          consultation.doctorInfo.nickname ||
+                          consultation.doctorInfo.realname
+        if (doctorName) {
+          return doctorName
+        }
       }
+      
+      const doctorId = consultation?.doctorId
       
       // 如果当前用户是医生（doctorId以doctor_开头，或者当前用户ID等于doctorId），显示当前用户的名字
       const currentUserId = this.currentUserInfo?.id || this.currentUserInfo?._id || this.currentUserInfo?.userId || this.currentUserInfo?.username || this.currentUserInfo?.phone
-      const doctorId = consultation?.doctorId
       
       // 判断当前用户是否是医生
       if (doctorId && currentUserId) {
@@ -283,6 +291,7 @@ export default {
         
         if (isCurrentUserDoctor) {
           // 当前用户是医生，显示当前用户的名字
+          console.log('✅ 当前用户是医生，显示当前用户名称:', this.currentUserDisplayName)
           return this.currentUserDisplayName
         }
       }
@@ -293,14 +302,22 @@ export default {
         // 如果doctorId以doctor_开头，去掉前缀后作为显示名称
         if (doctorId.startsWith('doctor_')) {
           const doctorIdWithoutPrefix = doctorId.replace('doctor_', '')
-          // 如果去掉前缀后是数字或ID，返回"医生"；否则尝试作为名字使用
+          // 如果去掉前缀后是纯数字，返回"医生"；否则尝试作为名字使用（如"qmp"）
           if (/^\d+$/.test(doctorIdWithoutPrefix)) {
             return '医生'
           }
           return doctorIdWithoutPrefix || '医生'
         }
-        // 如果doctorId看起来像是名字（包含中文），直接使用
+        // 如果doctorId看起来像是名字（包含中文或字母），直接使用
         if (/[\u4e00-\u9fa5]/.test(doctorId)) {
+          return doctorId
+        }
+        // 如果doctorId是纯字母（如"qmp"），直接使用
+        if (/^[a-zA-Z]+$/.test(doctorId)) {
+          return doctorId
+        }
+        // 如果doctorId是字母数字组合（如"qmp123"），也尝试使用（但长度限制）
+        if (/^[a-zA-Z0-9]+$/.test(doctorId) && doctorId.length <= 20 && doctorId.length >= 2) {
           return doctorId
         }
         return '医生'

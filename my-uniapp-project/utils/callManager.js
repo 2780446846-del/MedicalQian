@@ -8,7 +8,7 @@ import {
   acceptCall,
   rejectCall,
   endCall,
-  sendCallOffer,
+  sendCallOffer, 
   sendCallAnswer,
   sendIceCandidate,
   onCallStatusChange,
@@ -70,7 +70,7 @@ class CallManager {
    * 2. 使用原生插件实现实时视频通话（如 uni-app WebRTC 插件）
    * 3. 或使用第三方 SDK（如腾讯云、声网等）
    */
-  checkMediaSupport() {
+  checkMediaSupport() { 
     // #ifdef H5
     // H5 环境检查
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
