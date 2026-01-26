@@ -121,6 +121,19 @@
 
       <!-- 手机号验证码登录 -->
       <view v-if="currentTab === 'phone'" class="login-form">
+        <!-- #ifdef H5 -->
+        <view id="captcha" class="captcha-container"></view>
+        <!-- #endif -->
+        <!-- #ifdef APP-PLUS -->
+        <captcha
+          ref="captchaRef"
+          :config="captchaConfig"
+          @captchaSuccess="handleCaptchaSuccess"
+          @captchaError="handleCaptchaError"
+          @captchaFail="handleCaptchaFail"
+          @captchaClose="handleCaptchaClose"
+        />
+        <!-- #endif -->
         <view class="form-group">
           <view class="input-wrapper">
             <view class="input-icon">📱</view>
@@ -160,6 +173,13 @@
           @click="handlePhoneLogin"
         >
           {{ loading ? '登录中...' : '登录' }}
+        </button>
+        <button
+          class="oneclick-button"
+          :disabled="oneClickLoading"
+          @click="handleOneClickLogin"
+        >
+          {{ oneClickLoading ? '一键登录中...' : '一键登录' }}
         </button>
         <view class="register-link">
           还没有账号？
@@ -252,15 +272,18 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { request } from '@/utils/request.js'
 import { setToken, setUserInfo } from '@/utils/auth.js'
+import { startOneClickLogin } from '@/services/oneclick/oneClickLogin.js'
+import captcha from '@/components/captcha4/index.vue'
 
 // 当前登录方式
 const currentTab = ref('account') // 'account' | 'phone'
 
 // 加载状态
 const loading = ref(false)
+const oneClickLoading = ref(false)
 const errorMessage = ref('')
 const registerErrorMessage = ref('')
 
@@ -273,7 +296,8 @@ const accountForm = ref({
 // 手机号登录表单
 const phoneForm = ref({
   phone: '',
-  code: ''
+  code: '',
+  outId: ''
 })
 
 // 注册表单
@@ -289,6 +313,15 @@ const showRegister = ref(false)
 const showPassword = ref(false)
 const rememberMe = ref(false)
 const countdown = ref(0)
+const CAPTCHA_ID = '409ff4b182c43e02ca3c5fb3ea85a4f2'
+const captchaRef = ref(null)
+let pendingCaptchaShow = false
+const captchaConfig = ref({
+  captchaId: CAPTCHA_ID,
+  product: 'bind',
+  protocol: 'https://'
+})
+const captchaInstance = ref(null)
 
 // 切换登录方式
 const switchTab = (tab) => {
@@ -504,6 +537,161 @@ const handleAccountLogin = async () => {
   }
 }
 
+const handleOneClickLogin = async () => {
+  // #ifdef H5
+  oneClickLoading.value = true
+  try {
+    const result = await startOneClickLogin({
+      authPageOption: {
+        navText: '一键登录',
+        btnText: '立即登录',
+        isDialog: true,
+        manualClose: true,
+        agreeSymbol: '、',
+        privacyBefore: '我已阅读并同意',
+      },
+    })
+
+    if (result?.success && result?.token) {
+      await handleLoginSuccess(result)
+    } else {
+      const message = result?.message || '一键登录失败，请稍后重试'
+      uni.showToast({
+        title: message,
+        icon: 'none',
+        duration: 2000
+      })
+    }
+  } catch (error) {
+    const message = error?.message || '一键登录失败，请稍后重试'
+    uni.showToast({
+      title: message,
+      icon: 'none',
+      duration: 2000
+    })
+  } finally {
+    oneClickLoading.value = false
+  }
+  // #endif
+  // #ifndef H5
+  uni.showToast({
+    title: '一键登录仅支持H5环境',
+    icon: 'none',
+    duration: 2000
+  })
+  // #endif
+}
+
+
+
+const handleLoginSuccess = async (res) => {
+  // 保存token（使用统一的auth工具函数）
+  setToken(res.token)
+
+  // 保存用户信息（如果有，使用统一的auth工具函数）
+  if (res.data) {
+    // 使用统一的setUserInfo函数保存，确保使用正确的key
+    setUserInfo(res.data)
+    // 同时保留旧key以兼容旧代码
+    uni.setStorageSync('userInfo', res.data)
+
+    // 以用户ID（或用户名）作为 key，实现"每个用户一份资料"
+    const userId = res.data.id || res.data._id || res.data.userId || res.data.username || res.data.phone
+    try {
+      // 读取现有的所有用户资料映射
+      const allProfiles = uni.getStorageSync('userProfilesById') || {}
+
+      // 优先使用后端返回的数据库数据，其次使用本地缓存，最后用默认值
+      let profile = allProfiles[userId] || {
+        avatarUrl: 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar',
+        nickname: res.data.username || res.data.phone || '用户昵称',
+        gender: '保密',
+        phone: res.data.phone || '',
+        authStatus: '未认证',
+        realname: '',
+        idCard: ''
+      }
+
+      // 用后端返回的数据库数据更新本地资料（数据库数据优先）
+      if (res.data.avatarUrl !== undefined && res.data.avatarUrl !== null) {
+        profile.avatarUrl = res.data.avatarUrl || profile.avatarUrl || 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar'
+      }
+      if (res.data.nickname !== undefined && res.data.nickname !== null) {
+        profile.nickname = res.data.nickname || profile.nickname || res.data.username || res.data.phone || '用户昵称'
+      }
+      if (res.data.gender !== undefined && res.data.gender !== null) {
+        profile.gender = res.data.gender || profile.gender || '保密'
+      }
+      if (res.data.phone !== undefined && res.data.phone !== null) {
+        profile.phone = res.data.phone || profile.phone || ''
+      }
+      if (res.data.authStatus !== undefined && res.data.authStatus !== null) {
+        profile.authStatus = res.data.authStatus || profile.authStatus || '未认证'
+      }
+      if (res.data.realname !== undefined && res.data.realname !== null) {
+        profile.realname = res.data.realname || profile.realname || ''
+      }
+      if (res.data.idCard !== undefined && res.data.idCard !== null) {
+        profile.idCard = res.data.idCard || profile.idCard || ''
+      }
+
+      // 确保昵称至少是当前用户名或手机号
+      if (!profile.nickname) {
+        profile.nickname = res.data.username || res.data.phone || '用户昵称'
+      }
+
+      // 写回映射与当前用户标记
+      allProfiles[userId] = profile
+      uni.setStorageSync('userProfilesById', allProfiles)
+      uni.setStorageSync('currentUserId', userId)
+
+      // 同步到全局数据，便于各页面使用
+      const app = getApp && getApp()
+      if (app && app.globalData) {
+        app.globalData.userInfo = res.data
+        app.globalData.userProfile = profile
+      }
+
+      // 兼容旧逻辑：同时保留一份当前用户的 userProfile
+      uni.setStorageSync('userProfile', profile)
+
+      console.log('✅ 手机号登录成功，已同步用户资料:', {
+        userId,
+        avatarUrl: profile.avatarUrl ? '已设置' : '未设置',
+        nickname: profile.nickname,
+        gender: profile.gender,
+        phone: profile.phone || '未设置'
+      })
+    } catch (e) {
+      console.warn('同步手机号登录用户信息到全局失败:', e)
+    }
+  }
+  
+  uni.showToast({
+    title: '登录成功！',
+    icon: 'success',
+    duration: 1500
+  })
+  
+  // 延迟跳转，让用户看到成功提示
+  setTimeout(() => {
+    // 跳转到首页（tabBar页面需要使用switchTab）
+    uni.switchTab({
+      url: '/pages/index/index',
+      success: () => {
+        console.log('跳转到首页成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        // 如果switchTab失败，尝试使用reLaunch
+        uni.reLaunch({
+          url: '/pages/index/index'
+        })
+      }
+    })
+  }, 500)
+}
+
 // 手机号登录
 const handlePhoneLogin = async () => {
   // 清空错误信息
@@ -547,121 +735,18 @@ const handlePhoneLogin = async () => {
   
   try {
     const res = await request({
-      url: '/auth/login-by-code',
+      url: '/login/verify',
       method: 'POST',
       data: {
         phone: phoneForm.value.phone,
-        code: phoneForm.value.code
+        code: phoneForm.value.code,
+        outId: phoneForm.value.outId
       },
       needAuth: false
     })
     
     if (res.success && res.token) {
-      // 保存token（使用统一的auth工具函数）
-      setToken(res.token)
-      
-      // 保存用户信息（如果有，使用统一的auth工具函数）
-      if (res.data) {
-        // 使用统一的setUserInfo函数保存，确保使用正确的key
-        setUserInfo(res.data)
-        // 同时保留旧key以兼容旧代码
-        uni.setStorageSync('userInfo', res.data)
-
-        // 以用户ID（或用户名）作为 key，实现"每个用户一份资料"
-        const userId = res.data.id || res.data._id || res.data.userId || res.data.username || res.data.phone
-        try {
-          // 读取现有的所有用户资料映射
-          const allProfiles = uni.getStorageSync('userProfilesById') || {}
-
-          // 优先使用后端返回的数据库数据，其次使用本地缓存，最后用默认值
-          let profile = allProfiles[userId] || {
-            avatarUrl: 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar',
-            nickname: res.data.username || res.data.phone || '用户昵称',
-            gender: '保密',
-            phone: res.data.phone || '',
-            authStatus: '未认证',
-            realname: '',
-            idCard: ''
-          }
-
-          // 用后端返回的数据库数据更新本地资料（数据库数据优先）
-          if (res.data.avatarUrl !== undefined && res.data.avatarUrl !== null) {
-            profile.avatarUrl = res.data.avatarUrl || profile.avatarUrl || 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar'
-          }
-          if (res.data.nickname !== undefined && res.data.nickname !== null) {
-            profile.nickname = res.data.nickname || profile.nickname || res.data.username || res.data.phone || '用户昵称'
-          }
-          if (res.data.gender !== undefined && res.data.gender !== null) {
-            profile.gender = res.data.gender || profile.gender || '保密'
-          }
-          if (res.data.phone !== undefined && res.data.phone !== null) {
-            profile.phone = res.data.phone || profile.phone || ''
-          }
-          if (res.data.authStatus !== undefined && res.data.authStatus !== null) {
-            profile.authStatus = res.data.authStatus || profile.authStatus || '未认证'
-          }
-          if (res.data.realname !== undefined && res.data.realname !== null) {
-            profile.realname = res.data.realname || profile.realname || ''
-          }
-          if (res.data.idCard !== undefined && res.data.idCard !== null) {
-            profile.idCard = res.data.idCard || profile.idCard || ''
-          }
-
-          // 确保昵称至少是当前用户名或手机号
-          if (!profile.nickname) {
-            profile.nickname = res.data.username || res.data.phone || '用户昵称'
-          }
-
-          // 写回映射与当前用户标记
-          allProfiles[userId] = profile
-          uni.setStorageSync('userProfilesById', allProfiles)
-          uni.setStorageSync('currentUserId', userId)
-
-          // 同步到全局数据，便于各页面使用
-          const app = getApp && getApp()
-          if (app && app.globalData) {
-            app.globalData.userInfo = res.data
-            app.globalData.userProfile = profile
-          }
-
-          // 兼容旧逻辑：同时保留一份当前用户的 userProfile
-          uni.setStorageSync('userProfile', profile)
-
-          console.log('✅ 手机号登录成功，已同步用户资料:', {
-            userId,
-            avatarUrl: profile.avatarUrl ? '已设置' : '未设置',
-            nickname: profile.nickname,
-            gender: profile.gender,
-            phone: profile.phone || '未设置'
-          })
-        } catch (e) {
-          console.warn('同步手机号登录用户信息到全局失败:', e)
-        }
-      }
-      
-      uni.showToast({
-        title: '登录成功！',
-        icon: 'success',
-        duration: 1500
-      })
-      
-      // 延迟跳转，让用户看到成功提示
-      setTimeout(() => {
-        // 跳转到首页（tabBar页面需要使用switchTab）
-        uni.switchTab({
-          url: '/pages/index/index',
-          success: () => {
-            console.log('跳转到首页成功')
-          },
-          fail: (err) => {
-            console.error('跳转失败:', err)
-            // 如果switchTab失败，尝试使用reLaunch
-            uni.reLaunch({
-              url: '/pages/index/index'
-            })
-          }
-        })
-      }, 500)
+      await handleLoginSuccess(res)
     } else {
       errorMessage.value = res.message || '登录失败，请重试'
       uni.showToast({
@@ -705,103 +790,214 @@ const handleSendCode = async () => {
     })
     return
   }
-  
   // 防止重复点击
   if (countdown.value > 0) {
     return
   }
-  
-  loading.value = true
-  
-  try {
-    console.log('📤 开始发送验证码，手机号:', phoneForm.value.phone)
-    
-    const res = await request({
-      url: '/auth/send-code',
-      method: 'POST',
-      data: {
-        phone: phoneForm.value.phone,
-        type: 'login'
-      },
-      needAuth: false,
-      showError: false // 手动处理错误提示
-    })
-    
-    console.log('📥 收到响应:', res)
-    
-    if (res && res.success) {
-      uni.showToast({
-        title: res.message || '验证码已发送',
-        icon: 'success',
-        duration: 2000
-      })
-      
-      // 开始倒计时
-      countdown.value = 60
-      const timer = setInterval(() => {
-        countdown.value--
-        if (countdown.value <= 0) {
-          clearInterval(timer)
-        }
-      }, 1000)
-      
-      // 开发环境显示验证码（方便测试）
-      if (res.code) {
-        console.log('✅ 验证码（仅开发环境）:', res.code)
-        setTimeout(() => {
-          uni.showModal({
-            title: '验证码（开发环境）',
-            content: `验证码：${res.code}`,
-            showCancel: false
-          })
-        }, 500)
+
+  // 触发图形验证码
+  // #ifdef APP-PLUS
+  if (captchaRef.value) {
+    captchaRef.value.showCaptcha()
+  }
+  // #endif
+
+  // #ifdef H5
+  pendingCaptchaShow = true
+  await ensureH5Captcha()
+  if (captchaInstance.value && captchaInstance.value.showCaptcha) {
+    captchaInstance.value.showCaptcha()
+    pendingCaptchaShow = false
+  }
+  // #endif
+}
+
+const ensureH5Captcha = () => {
+  return new Promise((resolve, reject) => {
+    if (captchaInstance.value) {
+      if (captchaInstance.value.appendTo) {
+        captchaInstance.value.appendTo('#captcha')
       }
-    } else {
-      const errorMsg = res?.message || res?.error || '发送失败，请重试'
-      console.error('❌ 发送失败:', errorMsg)
-      uni.showToast({
-        title: errorMsg,
-        icon: 'none',
-        duration: 3000
+      return resolve(captchaInstance.value)
+    }
+    if (typeof window === 'undefined') {
+      return reject(new Error('H5 环境不可用'))
+    }
+    const initCaptcha = () => {
+      if (!window.initAlicom4) {
+        return reject(new Error('验证码脚本加载失败'))
+      }
+      window.initAlicom4({
+        captchaId: CAPTCHA_ID,
+        product: 'bind',
+        protocol: 'https://'
+      }, (captchaObj) => {
+        captchaInstance.value = captchaObj
+        captchaObj.appendTo('#captcha')
+        if (captchaObj.onNextReady) {
+          captchaObj.onNextReady(() => {
+            if (pendingCaptchaShow && captchaObj.showCaptcha) {
+              captchaObj.showCaptcha()
+              pendingCaptchaShow = false
+            }
+          })
+        } else if (captchaObj.onReady) {
+          captchaObj.onReady(() => {
+            if (pendingCaptchaShow && captchaObj.showCaptcha) {
+              captchaObj.showCaptcha()
+              pendingCaptchaShow = false
+            }
+          })
+        }
+        captchaObj.onSuccess(() => {
+          const result = captchaObj.getValidate()
+          handleCaptchaSuccess(result)
+        })
+        resolve(captchaObj)
       })
+    }
+    if (window.initAlicom4) {
+      initCaptcha()
+      return
+    }
+    const script = document.createElement('script')
+    script.src = '/static/ct4.js'
+    script.onload = initCaptcha
+    script.onerror = () => reject(new Error('验证码脚本加载失败'))
+    document.body.appendChild(script)
+  })
+}
+
+const handleCaptchaSuccess = async (result) => {
+  if (!result) {
+    uni.showToast({
+      title: '请完成图形验证',
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+
+  loading.value = true
+  try {
+    const captchaToken = await verifyCaptcha(result)
+    await sendSmsAfterCaptcha(captchaToken)
+    if (captchaInstance.value) {
+      if (captchaInstance.value.reset) {
+        captchaInstance.value.reset()
+      }
+      if (captchaInstance.value.hide) {
+        captchaInstance.value.hide()
+      }
     }
   } catch (error) {
-    console.error('❌ 发送验证码异常:', error)
-    console.error('错误详情:', JSON.stringify(error))
-    
-    let errorMsg = '发送失败，请检查网络连接'
-    
-    if (error.message) {
-      errorMsg = error.message
-    } else if (error.errMsg) {
-      if (error.errMsg.includes('timeout')) {
-        errorMsg = '请求超时，请检查网络连接'
-      } else if (error.errMsg.includes('fail')) {
-        errorMsg = '网络请求失败，请检查后端服务是否运行（http://localhost:3000）'
-      } else {
-        errorMsg = error.errMsg
-      }
-    } else if (typeof error === 'string') {
-      errorMsg = error
-    } else if (error.response) {
-      errorMsg = error.response.data?.message || error.response.data?.error || '服务器错误'
-    }
-    
+    const message = error?.message || error?.msg || error?.errMsg || '图形验证码验证失败'
     uni.showToast({
-      title: errorMsg,
+      title: message,
       icon: 'none',
-      duration: 3000
+      duration: 2000
     })
   } finally {
     loading.value = false
   }
 }
 
-// 注册
+const handleCaptchaError = () => {
+  uni.showToast({
+    title: '图形验证码加载失败',
+    icon: 'none',
+    duration: 2000
+  })
+}
+
+const handleCaptchaFail = () => {
+  uni.showToast({
+    title: '图形验证码校验失败，请重试',
+    icon: 'none',
+    duration: 2000
+  })
+}
+
+const handleCaptchaClose = () => {}
+
+const verifyCaptcha = async (result) => {
+  const res = await request({
+    url: '/login/captcha/verify',
+    method: 'POST',
+    data: {
+      phone: phoneForm.value.phone,
+      captchaId: result.captcha_id || CAPTCHA_ID,
+      lotNumber: result.lot_number,
+      captchaOutput: result.captcha_output,
+      passToken: result.pass_token,
+      genTime: result.gen_time
+    },
+    needAuth: false,
+    showError: false
+  })
+
+  if (!res || !res.captchaToken) {
+    throw new Error(res?.message || '图形验证码校验失败')
+  }
+  return res.captchaToken
+}
+
+const sendSmsAfterCaptcha = async (captchaToken) => {
+  console.log('📤 开始发送验证码，手机号:', phoneForm.value.phone)
+  const res = await request({
+    url: '/login/send',
+    method: 'POST',
+    data: {
+      phone: phoneForm.value.phone,
+      type: 'login',
+      captchaToken: captchaToken
+    },
+    needAuth: false,
+    showError: false
+  })
+
+  console.log('📥 收到响应:', res)
+
+  if (res && res.success) {
+    if (res.outId) {
+      phoneForm.value.outId = res.outId
+    }
+    uni.showToast({
+      title: res.message || '验证码已发送',
+      icon: 'success',
+      duration: 2000
+    })
+
+    countdown.value = 60
+    const timer = setInterval(() => {
+      countdown.value--
+      if (countdown.value <= 0) {
+        clearInterval(timer)
+      }
+    }, 1000)
+
+    if (res.code) {
+      console.log('✅ 验证码（仅开发环境）:', res.code)
+      setTimeout(() => {
+        uni.showModal({
+          title: '验证码（开发环境）',
+          content: `验证码：${res.code}`,
+          showCancel: false
+        })
+      }, 500)
+    }
+  } else {
+    const errorMsg = res?.message || res?.error || '发送失败，请重试'
+    console.error('❌ 发送失败:', errorMsg)
+    uni.showToast({
+      title: errorMsg,
+      icon: 'none',
+      duration: 3000
+    })
+  }
+}
+
 const handleRegister = async () => {
-  // 清空之前的错误信息
-  registerErrorMessage.value = ''
-  
   // 验证输入
   if (!registerForm.value.username || !registerForm.value.password) {
     registerErrorMessage.value = '请输入用户名和密码'
@@ -932,6 +1128,18 @@ const handleQQLogin = () => {
   padding: 40rpx;
   background: linear-gradient(135deg, #667eea 0%, #4facfe 50%, #00f2fe 100%);
   overflow: hidden;
+}
+
+/* 隐藏 H5 验证码容器（仅用于挂载弹窗实例） */
+.captcha-container {
+  position: absolute;
+  width: 320px;
+  height: 50px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  left: -9999px;
+  top: -9999px;
 }
 
 /* 背景装饰 */
@@ -1187,6 +1395,25 @@ const handleQQLogin = () => {
   opacity: 0.5;
   background: #c7c7cc;
   box-shadow: none;
+}
+
+/* 一键登录按钮 */
+.oneclick-button {
+  width: 100%;
+  height: 88rpx;
+  margin-top: 20rpx;
+  background: #ffffff;
+  border: 2rpx solid #667eea;
+  border-radius: 20rpx;
+  font-size: 30rpx;
+  color: #667eea;
+  font-weight: 600;
+}
+
+.oneclick-button:disabled {
+  opacity: 0.6;
+  color: #9aa0a6;
+  border-color: #d0d0d0;
 }
 
 /* 注册链接 */
