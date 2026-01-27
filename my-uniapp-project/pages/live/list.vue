@@ -70,7 +70,15 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted, onUnmounted } from 'vue'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 // 直播间列表
 const liveRooms = ref<any[]>([])

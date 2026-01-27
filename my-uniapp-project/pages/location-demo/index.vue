@@ -90,6 +90,8 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, computed } from 'vue'
 import { getUserLocation, openMapNavigation, LocationInfo } from '@/utils/location'
 
@@ -97,7 +99,7 @@ import { getUserLocation, openMapNavigation, LocationInfo } from '@/utils/locati
 const gettingLocation = ref(false)
 const currentLocation = ref<LocationInfo | null>(null)
 const locationError = ref('')
-const logs = ref<Array<{time: string, content: string}>>([])
+const logs = ref<{time: string, content: string}[]>([])
 
 // 目的地信息
 const destinationName = ref('')

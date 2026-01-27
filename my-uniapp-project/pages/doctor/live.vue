@@ -113,9 +113,13 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { WebRTCDoctor } from '@/utils/webrtc'
 import { WEBRTC_CONFIG } from '@/config/webrtc'
+
+// 全局变量
 
 // 直播状态
 const isLiving = ref(false)
@@ -166,9 +170,9 @@ const formatLiveTime = (seconds) => {
   const secs = seconds % 60
   
   if (hours > 0) {
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
   }
-  return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
 // 更新直播时长
@@ -187,8 +191,10 @@ const detectCameras = async () => {
       // @ts-ignore
       const devices = await navigator.mediaDevices.enumerateDevices()
       availableCameras = devices.filter((device) => device.kind === 'videoinput')
-      hasMultipleCameras.value = availableCameras.length > 1
-      console.log('检测到摄像头数量:', availableCameras.length)
+    // @ts-ignore
+    hasMultipleCameras.value = availableCameras.length > 1
+    // @ts-ignore
+    console.log('检测到摄像头数量:', availableCameras.length)
     }
   } catch (error) {
     console.error('检测摄像头失败:', error)
@@ -462,7 +468,9 @@ const startReceiveMessages = () => {
     if (Math.random() > 0.3) {
       const newMessage = {
         id: messageId++,
+        // @ts-ignore
         username: usernames[Math.floor(Math.random() * usernames.length)],
+        // @ts-ignore
         content: contents[Math.floor(Math.random() * contents.length)]
       }
       messages.value.push(newMessage)

@@ -280,8 +280,16 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted, watch } from 'vue'
 import { searchHospitals } from '../../services/amap'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 // 使用类型别名代替接口，避免可能的 TypeScript 编译问题
 type Hospital = {

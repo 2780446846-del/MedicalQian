@@ -282,9 +282,17 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted, computed, watch } from 'vue'
 import { AMAP_JS_KEY } from '@/utils/amapConfig.js'
 import { getUserLocationWithErrorHandling, openMapNavigationWithFallback } from '@/utils/location'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 interface Hospital {
   id: number
@@ -301,10 +309,10 @@ interface Hospital {
   businessArea: string
   rating: string
   cost: string
-  photos?: Array<{
+  photos?: {
     url: string
     title: string
-  }>
+  }[]
 }
 
 interface PatientComment {

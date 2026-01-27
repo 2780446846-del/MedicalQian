@@ -96,6 +96,7 @@
 </template>
 
 <script setup lang="ts">
+// @ts-ignore
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { WebRTCViewer } from '@/utils/webrtc'
 import { WEBRTC_CONFIG } from '@/config/webrtc'

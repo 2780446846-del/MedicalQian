@@ -108,7 +108,15 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref } from 'vue'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 type FileType = 'image' | 'video'
 

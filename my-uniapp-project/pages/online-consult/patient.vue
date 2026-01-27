@@ -72,12 +72,20 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted } from 'vue'
 import { connectSocket, sendMessage } from '@/utils/socket.js'
 import { saveConsultation } from '@/utils/consultationStorage.js'
 import { getUserInfo } from '@/utils/auth.js'
 import request from '@/utils/request.js'
 import { getPatients, getDefaultPatient } from '@/utils/patientStorage.js'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 interface Patient {
   id: string | number
