@@ -82,24 +82,74 @@
 
     <!-- 底部输入区域 -->
     <view class="input-area">
-      <view class="call-buttons">
+      <!-- 第一行：功能按钮 -->
+      <view class="input-buttons-row">
         <view class="call-btn" @click="startVideoCall" title="视频通话">
           <text class="call-icon">📹</text>
         </view>
         <view class="call-btn" @click="startAudioCall" title="语音通话">
           <text class="call-icon">📞</text>
         </view>
+        <view class="image-btn album-btn" @click="chooseImages" title="相册">
+          <text class="image-icon">🖼️</text>
+        </view>
+        <view class="emoji-btn" @click="toggleEmojiPicker" title="表情">
+          <text class="emoji-icon">😊</text>
+        </view>
+        <view class="tag-btn" @click="toggleTagPicker" title="标签">
+          <text class="tag-icon">🏷️</text>
+        </view>
       </view>
-      <view class="image-btn" @click="chooseImages">
-        <text class="image-icon">📷</text>
+      <!-- 第二行：输入框和发送按钮 -->
+      <view class="input-row">
+        <input
+          v-model="inputText"
+          class="chat-input"
+          placeholder="输入..."
+          placeholder-class="input-placeholder"
+        />
+        <button class="send-btn" @click="sendChatMessage" :disabled="!socketConnected">发送</button>
       </view>
-      <input
-        v-model="inputText"
-        class="chat-input"
-        placeholder="输入..."
-        placeholder-class="input-placeholder"
-      />
-      <button class="send-btn" @click="sendChatMessage" :disabled="!socketConnected">发送</button>
+    </view>
+
+    <!-- 表情选择器 -->
+    <view v-if="showEmojiPicker" class="emoji-picker-container">
+      <view class="emoji-picker-header">
+        <text class="emoji-picker-title">选择表情</text>
+        <view class="emoji-picker-close" @click="closeEmojiPicker">×</view>
+      </view>
+      <scroll-view class="emoji-picker-content" scroll-y>
+        <view class="emoji-grid">
+          <view 
+            v-for="(emoji, index) in emojiList" 
+            :key="index"
+            class="emoji-item"
+            @click="selectEmoji(emoji)"
+          >
+            <text class="emoji-text">{{ emoji }}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </view>
+
+    <!-- 标签选择器 -->
+    <view v-if="showTagPicker" class="tag-picker-container">
+      <view class="tag-picker-header">
+        <text class="tag-picker-title">快捷消息</text>
+        <view class="tag-picker-close" @click="closeTagPicker">×</view>
+      </view>
+      <scroll-view class="tag-picker-content" scroll-y>
+        <view class="tag-list">
+          <view 
+            v-for="(tag, index) in tagList" 
+            :key="index"
+            class="tag-item"
+            @click="selectTag(tag)"
+          >
+            <text class="tag-text">{{ tag }}</text>
+          </view>
+        </view>
+      </scroll-view>
     </view>
 
     <!-- 视频预览弹窗 -->
@@ -1851,6 +1901,122 @@ const closeVideoPreview = () => {
 }
 
 /**
+ * 切换表情选择器显示/隐藏
+ */
+function toggleEmojiPicker() {
+  showEmojiPicker.value = !showEmojiPicker.value
+  // 如果打开表情选择器，关闭标签选择器
+  if (showEmojiPicker.value) {
+    showTagPicker.value = false
+  }
+}
+
+/**
+ * 关闭表情选择器
+ */
+function closeEmojiPicker() {
+  showEmojiPicker.value = false
+}
+
+/**
+ * 选择表情
+ */
+function selectEmoji(emoji: string) {
+  inputText.value += emoji
+  // 关闭表情选择器
+  closeEmojiPicker()
+}
+
+/**
+ * 切换标签选择器显示/隐藏
+ */
+function toggleTagPicker() {
+  showTagPicker.value = !showTagPicker.value
+  // 如果打开标签选择器，关闭表情选择器
+  if (showTagPicker.value) {
+    showEmojiPicker.value = false
+  }
+}
+
+/**
+ * 关闭标签选择器
+ */
+function closeTagPicker() {
+  showTagPicker.value = false
+}
+
+/**
+ * 选择标签并发送
+ */
+async function selectTag(tag: string) {
+  // 关闭标签选择器
+  closeTagPicker()
+  
+  // 如果未连接，提示用户
+  if (!socketConnected.value) {
+    uni.showToast({
+      title: '未连接，请稍候',
+      icon: 'none'
+    })
+    return
+  }
+
+  try {
+    // 先显示在界面上（乐观更新）
+    const chatMessage: ChatMessage = {
+      id: Date.now().toString(),
+      content: tag,
+      type: 'text',
+      isMe: true, // 患者发送的消息
+      timestamp: Date.now()
+    }
+    messages.value.push(chatMessage)
+    // 确保消息按时间排序（最新的在底部）
+    messages.value.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+    
+    // 滚动到底部
+    scrollToBottom()
+    
+    // 通过 Socket.IO 发送标签消息给医生
+    const patientId = getCurrentPatientId()
+    if (!patientId) {
+      throw new Error('患者ID未设置')
+    }
+    if (!doctorId.value) {
+      throw new Error('医生ID未设置')
+    }
+    
+    // 获取前台账号ID（当前登录用户的ID）
+    const userInfo = getUserInfo()
+    const createdBy = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username || userInfo?.phone || null
+    console.log('📤 患者端发送标签消息:', {
+      fromUserId: patientId,
+      toUserId: doctorId.value,
+      createdBy: createdBy,
+      content: tag
+    })
+    
+    await sendMessage(doctorId.value, tag, 'text', {}, createdBy)
+    
+    // 发送成功后立即保存咨询记录（确保所有聊天记录都被保存）
+    await saveCurrentConsultation()
+    
+    console.log('✅ 标签消息发送成功（患者 -> 医生），已保存到咨询记录')
+  } catch (error: any) {
+    console.error('发送标签消息失败:', error)
+    uni.showToast({
+      title: error.message || '发送失败',
+      icon: 'none'
+    })
+    // 移除刚才添加的消息
+    const lastIndex = messages.value.length - 1
+    if (lastIndex >= 0 && messages.value[lastIndex].isMe && messages.value[lastIndex].content === tag) {
+      messages.value.splice(lastIndex, 1)
+    }
+  }
+}
+
+/**
  * 选择图片（支持多图）
  */
 function chooseImages() {
@@ -2031,6 +2197,79 @@ async function sendChatMessage() {
 }
 
 const scrollTop = ref(0)
+
+// 表情选择器相关
+const showEmojiPicker = ref(false)
+const emojiList = [
+  '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇',
+  '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚',
+  '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩',
+  '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣',
+  '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬',
+  '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗',
+  '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯',
+  '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐',
+  '🥴', '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '😈',
+  '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾',
+  '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿',
+  '😾', '👋', '🤚', '🖐', '✋', '🖖', '👌', '🤌', '🤏', '✌️',
+  '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️',
+  '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲',
+  '🤝', '🙏', '✍️', '💪', '🦾', '🦿', '🦵', '🦶', '👂', '🦻',
+  '👃', '👶', '👧', '🧒', '👦', '👩', '🧑', '👨', '👩‍🦱', '🧑‍🦱',
+  '👨‍🦱', '👩‍🦰', '🧑‍🦰', '👨‍🦰', '👱‍♀️', '👱', '👱‍♂️', '👩‍🦳', '🧑‍🦳', '👨‍🦳',
+  '👩‍🦲', '🧑‍🦲', '👨‍🦲', '🧔', '👵', '🧓', '👴', '👲', '👳‍♀️', '👳',
+  '👳‍♂️', '🧕', '👮‍♀️', '👮', '👮‍♂️', '👷‍♀️', '👷', '👷‍♂️', '💂‍♀️', '💂',
+  '💂‍♂️', '🕵️‍♀️', '🕵️', '🕵️‍♂️', '👩‍⚕️', '🧑‍⚕️', '👨‍⚕️', '👩‍🌾', '🧑‍🌾', '👨‍🌾',
+  '👩‍🍳', '🧑‍🍳', '👨‍🍳', '👩‍🎓', '🧑‍🎓', '👨‍🎓', '👩‍🎤', '🧑‍🎤', '👨‍🎤', '👩‍🏫',
+  '🧑‍🏫', '👨‍🏫', '👩‍🏭', '🧑‍🏭', '👨‍🏭', '👩‍💻', '🧑‍💻', '👨‍💻', '👩‍💼', '🧑‍💼',
+  '👨‍💼', '👩‍🔧', '🧑‍🔧', '👨‍🔧', '👩‍🔬', '🧑‍🔬', '👨‍🔬', '👩‍🎨', '🧑‍🎨', '👨‍🎨',
+  '👩‍🚒', '🧑‍🚒', '👨‍🚒', '👩‍✈️', '🧑‍✈️', '👨‍✈️', '👩‍🚀', '🧑‍🚀', '👨‍🚀', '👩‍⚖️',
+  '🧑‍⚖️', '👨‍⚖️', '👰', '🤵', '👸', '🤴', '🦸‍♀️', '🦸', '🦸‍♂️', '🦹‍♀️',
+  '🦹', '🦹‍♂️', '🤶', '🎅', '🧙‍♀️', '🧙', '🧙‍♂️', '🧝‍♀️', '🧝', '🧝‍♂️',
+  '🧛‍♀️', '🧛', '🧛‍♂️', '🧜‍♀️', '🧜', '🧜‍♂️', '🧚‍♀️', '🧚', '🧚‍♂️', '👼',
+  '🤰', '🤱', '👩‍🍼', '🧑‍🍼', '👨‍🍼', '🙇‍♀️', '🙇', '🙇‍♂️', '💁‍♀️', '💁',
+  '💁‍♂️', '🙅‍♀️', '🙅', '🙅‍♂️', '🙆‍♀️', '🙆', '🙆‍♂️', '🙋‍♀️', '🙋', '🙋‍♂️',
+  '🧏‍♀️', '🧏', '🧏‍♂️', '🤦‍♀️', '🤦', '🤦‍♂️', '🤷‍♀️', '🤷', '🤷‍♂️', '🙎‍♀️',
+  '🙎', '🙎‍♂️', '🙍‍♀️', '🙍', '🙍‍♂️', '💇‍♀️', '💇', '💇‍♂️', '💆‍♀️', '💆',
+  '💆‍♂️', '🧖‍♀️', '🧖', '🧖‍♂️', '💃', '🕺', '🕴', '👯‍♀️', '👯', '👯‍♂️',
+  '🧘‍♀️', '🧘', '🧘‍♂️', '🛀', '🛌', '👭', '👫', '👬', '💏', '💑',
+  '👪', '👨‍👩‍👧', '👨‍👩‍👧‍👦', '👨‍👩‍👦‍👦', '👨‍👩‍👧‍👧', '👩‍👩‍👦', '👩‍👩‍👧', '👩‍👩‍👧‍👦', '👩‍👩‍👦‍👦', '👩‍👩‍👧‍👧',
+  '👨‍👨‍👦', '👨‍👨‍👧', '👨‍👨‍👧‍👦', '👨‍👨‍👦‍👦', '👨‍👨‍👧‍👧', '👩‍👦', '👩‍👧', '👩‍👧‍👦', '👩‍👦‍👦', '👩‍👧‍👧',
+  '👨‍👦', '👨‍👧', '👨‍👧‍👦', '👨‍👦‍👦', '👨‍👧‍👧', '🧶', '🧵', '🧥', '🥼', '🦺',
+  '👚', '👕', '👖', '🩲', '🩳', '👔', '👗', '👙', '👘', '🥻',
+  '🩱', '🥽', '🥼', '🧦', '🧤', '🧣', '🧢', '👒', '🎩', '🎓',
+  '⛑', '📿', '💄', '💍', '💎', '🔇', '🔈', '🔉', '🔊', '📢',
+  '📣', '📯', '🔔', '🔕', '🎼', '🎵', '🎶', '🎙', '🎚', '🎛',
+  '🎤', '🎧', '📻', '🎷', '🪗', '🎸', '🎹', '🎺', '🎻', '🪕',
+  '🥳', '🎪', '🎭', '🩰', '🎨', '🎬', '🎤', '🎧', '🎼', '🎹',
+  '🎸', '🎺', '🎻', '🥁', '🎷', '🎺', '🎸', '🎹', '🎤', '🎧'
+]
+
+// 标签选择器相关
+const showTagPicker = ref(false)
+const tagList = [
+  '好的，谢谢医生',
+  '我明白了',
+  '还有问题',
+  '症状已经好转',
+  '需要进一步检查',
+  '我会按时服药',
+  '谢谢您的建议',
+  '我会注意的',
+  '明白了，谢谢',
+  '症状没有改善',
+  '我会按时复查',
+  '还有其他症状',
+  '需要调整用药吗',
+  '谢谢您的耐心',
+  '我会配合治疗',
+  '症状有所缓解',
+  '需要做检查吗',
+  '我会注意饮食',
+  '谢谢医生',
+  '我理解了'
+]
 </script>
 
 <style lang="scss">
@@ -2335,8 +2574,8 @@ const scrollTop = ref(0)
 
 .input-area {
   display: flex;
-  align-items: center;
-  gap: 20rpx;
+  flex-direction: column;
+  gap: 12rpx;
   padding: 20rpx 30rpx;
   background-color: #fff;
   border-top: 1rpx solid #e5e5ea;
@@ -2346,30 +2585,40 @@ const scrollTop = ref(0)
   bottom: 0;
   z-index: 10;
   
-  .call-buttons {
+  /* 第一行：功能按钮 */
+  .input-buttons-row {
     display: flex;
-    gap: 10rpx;
+    align-items: center;
+    gap: 12rpx;
+    flex-shrink: 0;
+  }
+  
+  /* 第二行：输入框和发送按钮 */
+  .input-row {
+    display: flex;
+    align-items: center;
+    gap: 12rpx;
+    flex-shrink: 0;
+  }
+  
+  .call-btn {
+    width: 60rpx;
+    height: 60rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f0f0f0;
+    border-radius: 30rpx;
+    cursor: pointer;
     flex-shrink: 0;
     
-    .call-btn {
-      width: 60rpx;
-      height: 60rpx;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: #f0f0f0;
-      border-radius: 30rpx;
-      cursor: pointer;
-      flex-shrink: 0;
-      
-      .call-icon {
-        font-size: 32rpx;
-      }
-      
-      &:active {
-        opacity: 0.7;
-        background-color: #e0e0e0;
-      }
+    .call-icon {
+      font-size: 32rpx;
+    }
+    
+    &:active {
+      opacity: 0.7;
+      background-color: #e0e0e0;
     }
   }
   
@@ -2386,6 +2635,48 @@ const scrollTop = ref(0)
     
     .image-icon {
       font-size: 36rpx;
+    }
+    
+    &:active {
+      opacity: 0.7;
+      background-color: #e0e0e0;
+    }
+  }
+  
+  .emoji-btn {
+    width: 60rpx;
+    height: 60rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f0f0f0;
+    border-radius: 30rpx;
+    cursor: pointer;
+    flex-shrink: 0;
+    
+    .emoji-icon {
+      font-size: 32rpx;
+    }
+    
+    &:active {
+      opacity: 0.7;
+      background-color: #e0e0e0;
+    }
+  }
+  
+  .tag-btn {
+    width: 60rpx;
+    height: 60rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f0f0f0;
+    border-radius: 30rpx;
+    cursor: pointer;
+    flex-shrink: 0;
+    
+    .tag-icon {
+      font-size: 32rpx;
     }
     
     &:active {
@@ -2480,6 +2771,161 @@ const scrollTop = ref(0)
       background-color: #000;
     }
   }
+}
+
+/* 表情选择器样式 */
+.emoji-picker-container {
+  position: fixed;
+  bottom: 120rpx;
+  left: 0;
+  right: 0;
+  background-color: #fff;
+  border-top: 1rpx solid #e5e5ea;
+  z-index: 1000;
+  max-height: 500rpx;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.1);
+}
+
+.emoji-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 30rpx;
+  border-bottom: 1rpx solid #e5e5ea;
+}
+
+.emoji-picker-title {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.emoji-picker-close {
+  width: 50rpx;
+  height: 50rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40rpx;
+  color: #666;
+  cursor: pointer;
+}
+
+.emoji-picker-close:active {
+  opacity: 0.7;
+}
+
+.emoji-picker-content {
+  flex: 1;
+  height: 400rpx;
+  overflow-y: auto;
+}
+
+.emoji-grid {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 20rpx;
+  gap: 10rpx;
+}
+
+.emoji-item {
+  width: 80rpx;
+  height: 80rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f5f5f5;
+  border-radius: 12rpx;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.emoji-text {
+  font-size: 40rpx;
+  line-height: 1;
+}
+
+.emoji-item:active {
+  background-color: #e0e0e0;
+}
+
+/* 标签选择器样式 */
+.tag-picker-container {
+  position: fixed;
+  bottom: 120rpx;
+  left: 0;
+  right: 0;
+  background-color: #fff;
+  border-top: 1rpx solid #e5e5ea;
+  z-index: 1000;
+  max-height: 500rpx;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -4rpx 20rpx rgba(0, 0, 0, 0.1);
+}
+
+.tag-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 30rpx;
+  border-bottom: 1rpx solid #e5e5ea;
+}
+
+.tag-picker-title {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.tag-picker-close {
+  width: 50rpx;
+  height: 50rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40rpx;
+  color: #666;
+  cursor: pointer;
+}
+
+.tag-picker-close:active {
+  opacity: 0.7;
+}
+
+.tag-picker-content {
+  flex: 1;
+  height: 400rpx;
+  overflow-y: auto;
+}
+
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  padding: 20rpx;
+  gap: 12rpx;
+}
+
+.tag-item {
+  padding: 20rpx 24rpx;
+  background-color: #f5f5f5;
+  border-radius: 12rpx;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border: 1rpx solid #e0e0e0;
+}
+
+.tag-text {
+  font-size: 28rpx;
+  color: #333;
+  line-height: 1.5;
+}
+
+.tag-item:active {
+  background-color: #e0e0e0;
+  border-color: #4A90E2;
 }
 </style>
 
