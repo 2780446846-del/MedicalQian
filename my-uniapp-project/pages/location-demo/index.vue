@@ -93,7 +93,7 @@
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
 import { ref, computed } from 'vue'
-import { getUserLocation, openMapNavigation, LocationInfo } from '@/utils/location'
+import { getUserLocation, openMapNavigation, LocationInfo } from '../../utils/location'
 
 // 状态管理
 const gettingLocation = ref(false)

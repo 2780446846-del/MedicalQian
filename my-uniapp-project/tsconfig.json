@@ -14,9 +14,11 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["*"]
+      "@/*": ["*"],
+      "vue": ["./global.d.ts"]
     },
-    "typeRoots": ["./node_modules/@types", "./node_modules/@dcloudio/types"]
+    "typeRoots": ["./node_modules/@types", "./node_modules/@dcloudio/types", "./"],
+    "types": ["@dcloudio/types"]
   },
   "include": ["**/*.ts", "**/*.tsx", "**/*.vue", "global.d.ts"],
   "exclude": ["node_modules", "unpackage", "dist"]

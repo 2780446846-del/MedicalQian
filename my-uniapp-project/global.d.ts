@@ -373,6 +373,7 @@ declare module 'vue' {
   export function onUpdated(callback: () => void): any;
   export function onBeforeMount(callback: () => void): any;
   export function reactive<T>(value: T): T;
+  export function nextTick(callback?: () => void): Promise<void>;
   export interface DefineComponent {
     new(props?: any): any;
   }

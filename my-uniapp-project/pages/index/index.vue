@@ -265,9 +265,9 @@
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
 import { ref, onMounted, onUnmounted } from 'vue'
-import ThemeToggle from '@/components/ThemeToggle.vue'
-import { getAllArticles } from '@/utils/articleStorage.js'
-import { API_BASE_URL } from '@/utils/config.js'
+import ThemeToggle from '../../components/ThemeToggle.vue'
+import { getAllArticles } from '../../utils/articleStorage'
+import { API_BASE_URL } from '../../utils/config.example'
 
 // 声明全局变量
 declare const uni: any;

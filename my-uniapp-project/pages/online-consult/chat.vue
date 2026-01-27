@@ -223,6 +223,7 @@
 </template>
 
 <script setup lang="ts">
+// @ts-ignore
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import {
   connectSocket,
@@ -234,11 +235,11 @@ import {
   onIncomingCall,
   offIncomingCall,
   getSocketInstance
-} from '@/utils/socket.js'
-import { saveConsultation } from '@/utils/consultationStorage.js'
-import { getUserInfo } from '@/utils/auth.js'
-import request from '@/utils/request.js'
-import getCallManager from '@/utils/callManager.js'
+} from '../../utils/socket'
+import { saveConsultation } from '../../utils/consultationStorage'
+import { getUserInfo } from '../../utils/auth'
+import request from '../../utils/request'
+import getCallManager from '../../utils/callManager'
 
 interface PatientInfo {
   name: string

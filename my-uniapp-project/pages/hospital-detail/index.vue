@@ -285,8 +285,8 @@
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
 import { ref, onMounted, computed, watch } from 'vue'
-import { AMAP_JS_KEY } from '@/utils/amapConfig.js'
-import { getUserLocationWithErrorHandling, openMapNavigationWithFallback } from '@/utils/location'
+import { AMAP_JS_KEY } from '../../utils/amapConfig'
+import { getUserLocationWithErrorHandling, openMapNavigationWithFallback } from '../../utils/location'
 
 // 声明全局变量
 declare const uni: any;
