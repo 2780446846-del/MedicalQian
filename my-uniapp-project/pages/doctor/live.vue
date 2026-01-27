@@ -110,9 +110,13 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { WebRTCDoctor } from '@/utils/webrtc'
 import { WEBRTC_CONFIG } from '@/config/webrtc'
+
+// 全局变量
 
 // 直播状态
 const isLiving = ref(false)
@@ -120,11 +124,11 @@ const liveTitle = ref('')
 const devicePosition = ref('user') // user 前置, environment 后置
 const streamData = ref({ action: '', position: 'user' }) // 用于触发renderjs
 const hasMultipleCameras = ref(false) // 是否有多个摄像头
-let availableCameras: any[] = [] // 可用的摄像头列表
+let availableCameras = [] // 可用的摄像头列表
 
 // WebRTC 实例
-let webrtcDoctor: WebRTCDoctor | null = null
-let currentStream: MediaStream | null = null
+let webrtcDoctor = null
+let currentStream = null
 
 // 医生信息
 const doctorInfo = ref({
@@ -140,7 +144,7 @@ const viewerCount = ref(0)
 const likeCount = ref(0)
 
 // 聊天消息
-const messages = ref<any[]>([])
+const messages = ref([])
 let messageId = 1
 
 // 最近的3条消息
@@ -151,23 +155,23 @@ const recentMessages = computed(() => {
 // 直播时长
 const liveTime = ref('00:00')
 let liveStartTime = 0
-let liveTimer: any = null
-let viewerTimer: any = null
-let messageTimer: any = null
-let likeTimer: any = null
+let liveTimer = null
+let viewerTimer = null
+let messageTimer = null
+let likeTimer = null
 
 // 格式化直播时长
 //将传入的总秒数比如3661秒 格式化为HH:MM:SS 或 MM:SS格式的字符串
 //用整除和取模运算拆分出小时、分钟、秒
-const formatLiveTime = (seconds: number) => {
+const formatLiveTime = (seconds) => {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   const secs = seconds % 60
 
   if (hours > 0) {
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
   }
-  return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
 // 更新直播时长
@@ -188,9 +192,11 @@ const detectCameras = async () => {
     if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
       // @ts-ignore
       const devices = await navigator.mediaDevices.enumerateDevices()
-      availableCameras = devices.filter((device: any) => device.kind === 'videoinput')
-      hasMultipleCameras.value = availableCameras.length > 1
-      console.log('检测到摄像头数量:', availableCameras.length)
+      availableCameras = devices.filter((device) => device.kind === 'videoinput')
+    // @ts-ignore
+    hasMultipleCameras.value = availableCameras.length > 1
+    // @ts-ignore
+    console.log('检测到摄像头数量:', availableCameras.length)
     }
   } catch (error) {
     console.error('检测摄像头失败:', error)
@@ -323,7 +329,7 @@ const switchCamera = async () => {
 }
 
 // 接收来自 renderjs 的视频流（用于 WebRTC）
-const setWebRTCStream = (stream: MediaStream) => {
+const setWebRTCStream = (stream) => {
   console.log('📹 收到来自 renderjs 的视频流:', stream)
   console.log('视频轨道数:', stream.getVideoTracks().length)
   console.log('音频轨道数:', stream.getAudioTracks().length)
@@ -350,7 +356,7 @@ const setWebRTCStream = (stream: MediaStream) => {
 }
 
 // 使用流初始化 WebRTC（独立的异步函数）
-const initWebRTCWithStream = async (stream: MediaStream) => {
+const initWebRTCWithStream = async (stream) => {
   console.log('🚀 开始初始化 WebRTC...')
 
   // 1. 初始化 WebRTC
@@ -464,7 +470,9 @@ const startReceiveMessages = () => {
     if (Math.random() > 0.3) {
       const newMessage = {
         id: messageId++,
+        // @ts-ignore
         username: usernames[Math.floor(Math.random() * usernames.length)],
+        // @ts-ignore
         content: contents[Math.floor(Math.random() * contents.length)]
       }
       messages.value.push(newMessage)
@@ -490,7 +498,7 @@ onMounted(() => {
   console.log('直播页面已加载')
 
   // 监听来自 renderjs 的视频流事件
-  uni.$on('webrtc-stream-ready', (stream: MediaStream) => {
+uni.$on('webrtc-stream-ready', (stream) => {
     console.log('📹 通过事件接收到视频流')
     setWebRTCStream(stream)
   })

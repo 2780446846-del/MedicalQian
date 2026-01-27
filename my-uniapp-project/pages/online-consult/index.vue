@@ -54,7 +54,7 @@
             mode="aspectFill" 
             class="upload-image"
             @error="(e) => handleImageError(e, index)"
-            @load="() => console.log(`✅ 图片 ${index + 1} 加载成功`)"
+            @load="() => console.log(`✅ 图片 ${Number(index) + 1} 加载成功`)"
           />
           <view v-if="item.type === 'video'" class="video-badge">视频</view>
           <view v-if="item.type === 'video'" class="play-icon">▶</view>
@@ -108,7 +108,15 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref } from 'vue'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 type FileType = 'image' | 'video'
 
@@ -350,7 +358,7 @@ const chooseFile = () => {
     sourceType: ['album', 'camera'],
     success: (res) => {
       console.log('✅ chooseImage 成功，返回图片数:', res.tempFilePaths?.length || 0)
-      const paths = res.tempFilePaths || []
+      const paths = Array.isArray(res.tempFilePaths) ? res.tempFilePaths : []
       let addedCount = 0
       
       paths.forEach((p: string, index: number) => {
@@ -478,7 +486,7 @@ const handleVoiceInput = () => {
 
   // #ifdef APP-PLUS || MP-WEIXIN
   try {
-    const recorderManager = uni.createRecorderManager()
+    const recorderManager = uni.getRecorderManager()
     if (!recording.value) {
       recording.value = true
       recorderManager.start({
@@ -494,7 +502,7 @@ const handleVoiceInput = () => {
         icon: 'none'
       })
     } else {
-      const rm = uni.createRecorderManager()
+      const rm = uni.getRecorderManager()
       rm.stop()
     }
   } catch (e) {

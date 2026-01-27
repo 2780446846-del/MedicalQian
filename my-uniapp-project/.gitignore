@@ -1,4 +1,31 @@
 unpackage/dist/
+vue3-ts/
+node_modules/
 
 # 项目配置文件（包含个人配置，不应提交）
 utils/config.js
+
+# IDE相关
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志文件
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+# 测试覆盖率报告
+coverage/
+.nyc_output/

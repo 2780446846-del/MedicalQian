@@ -695,9 +695,9 @@ const saveEvent = async () => {
   }
   
   const typeConfig = typeMap[formData.value.serviceType] || typeMap['doctor']
-  const eventType = typeConfig.type
-  const icon = typeConfig.icon
-  const color = typeConfig.color
+  const eventType = typeConfig!.type
+  const icon = typeConfig!.icon
+  const color = typeConfig!.color
   
   // 创建新事件
   const newEvent: ScheduleEvent = {
@@ -831,9 +831,9 @@ const updateEvent = async () => {
   }
   
   const typeConfig = typeMap[formData.value.serviceType] || typeMap['doctor']
-  const eventType = typeConfig.type
-  const icon = typeConfig.icon
-  const color = typeConfig.color
+  const eventType = typeConfig!.type
+  const icon = typeConfig!.icon
+  const color = typeConfig!.color
   
   // 更新事件
   const eventIndex = events.value.findIndex(e => e.id === selectedEvent.value!.id)

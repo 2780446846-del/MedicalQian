@@ -223,7 +223,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+// @ts-ignore
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import {
   connectSocket,
   disconnectSocket,
@@ -234,11 +235,11 @@ import {
   onIncomingCall,
   offIncomingCall,
   getSocketInstance
-} from '@/utils/socket.js'
-import { saveConsultation } from '@/utils/consultationStorage.js'
-import { getUserInfo } from '@/utils/auth.js'
-import request from '@/utils/request.js'
-import getCallManager from '@/utils/callManager.js'
+} from '../../utils/socket'
+import { saveConsultation } from '../../utils/consultationStorage'
+import { getUserInfo } from '../../utils/auth'
+import request from '../../utils/request'
+import getCallManager from '../../utils/callManager'
 
 interface PatientInfo {
   name: string
@@ -350,6 +351,8 @@ async function loadLatestMessagesFromServer(incremental: boolean = false, sinceT
     const response = await request({
       url: requestUrl,
       method: 'GET',
+      data: {},
+      needAuth: true,
       showLoading: false, // 自动拉取时不显示loading
       showError: false // 自动拉取时静默失败
     })
@@ -504,9 +507,9 @@ function mergeMessages(serverMessages: ChatMessage[]) {
     messages.value = mergedMessages
     
     // 滚动到底部显示最新消息
-    nextTick(() => {
-      scrollToBottom()
-    })
+    setTimeout(() => {
+    scrollToBottom()
+  }, 0)
     
     // 保存咨询记录
     saveCurrentConsultation()
@@ -768,7 +771,10 @@ async function saveCurrentConsultation() {
             symptomDescription: consultationData.symptomDescription,
             symptomImages: consultationData.symptomImages,
             createdBy: frontDeskUserId // 传递前台账号ID
-          }
+          },
+          needAuth: true,
+          showLoading: true,
+          showError: true
         })
         
         if (syncResponse.success && syncResponse.data) {
@@ -868,7 +874,11 @@ onMounted(async () => {
     try {
       const doctorResponse = await request({
         url: '/chat/on-duty-doctors',
-        method: 'GET'
+        method: 'GET',
+        data: {},
+        needAuth: true,
+        showLoading: false,
+        showError: false
       })
       
       if (doctorResponse.success && doctorResponse.data && doctorResponse.data.length > 0) {
@@ -908,7 +918,7 @@ watch(messages, () => {
     // 自动滚动到底部显示最新消息
     scrollToBottom()
   }
-}, { deep: true })
+})
 
 onUnmounted(() => {
   // 停止自动拉取定时器

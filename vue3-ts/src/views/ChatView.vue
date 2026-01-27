@@ -800,7 +800,7 @@ function chooseImages() {
     // 处理每个选中的图片
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
-      if (file.type.startsWith('image/')) {
+      if (file && file.type.startsWith('image/')) {
         await sendImageMessage(file)
       }
     }
@@ -1564,9 +1564,9 @@ async function selectPatient(patient: Patient) {
             timestamp: msg.timestamp || (msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now()),
             type: msg.type || 'text',
             imageUrl: msg.type === 'image' ? msg.content : undefined
-          }
+          } as Message
         })
-        .filter((msg: any) => {
+        .filter((msg: Message) => {
           // 过滤掉空消息（没有内容且不是图片或患者卡片）
           return msg.content || msg.type === 'image' || msg.type === 'patient-card'
         })
@@ -3314,13 +3314,7 @@ function cleanupCallManager() {
   cursor: not-allowed;
 }
 
-.album-btn {
-  /* 相册按钮样式与通话按钮一致 */
-}
-
-.emoji-btn {
-  /* 表情按钮样式与通话按钮一致 */
-}
+/* 相册按钮和表情按钮样式与通话按钮一致 */
 
 .emoji-picker-container {
   position: absolute;

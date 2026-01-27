@@ -72,12 +72,20 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted } from 'vue'
-import { connectSocket, sendMessage } from '@/utils/socket.js'
-import { saveConsultation } from '@/utils/consultationStorage.js'
-import { getUserInfo } from '@/utils/auth.js'
-import request from '@/utils/request.js'
-import { getPatients, getDefaultPatient } from '@/utils/patientStorage.js'
+import { connectSocket, sendMessage } from '../../utils/socket'
+import { saveConsultation } from '../../utils/consultationStorage'
+import { getUserInfo } from '../../utils/auth'
+import request from '../../utils/request'
+import { getPatients, getDefaultPatient } from '../../utils/patientStorage'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 interface Patient {
   id: string | number
@@ -318,7 +326,10 @@ const submitConsult = async () => {
             symptomDescription: consultationData.symptomDescription,
             symptomImages: consultationData.symptomImages,
             createdBy: frontDeskUserId // 传递前台账号ID
-          }
+          },
+          needAuth: true,
+          showLoading: true,
+          showError: true
         })
         
         if (syncResponse.success && syncResponse.data) {

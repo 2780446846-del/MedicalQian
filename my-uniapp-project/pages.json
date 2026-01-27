@@ -408,6 +408,20 @@
         "navigationBarTitleText": "在线咨询",
         "backgroundColor": "#f6f7fb"
       }
+    },
+    {
+      "path": "pages/web-view/index",
+      "style": {
+        "navigationBarTitleText": "网页导航",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    {
+      "path": "pages/location-demo/index",
+      "style": {
+        "navigationBarTitleText": "位置与导航演示",
+        "backgroundColor": "#ffffff"
+      }
     }
   ],
   "globalStyle": {

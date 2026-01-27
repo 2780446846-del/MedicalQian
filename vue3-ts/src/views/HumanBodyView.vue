@@ -295,7 +295,6 @@ const notifications = ref([
 ])
 
 // 图表引用
-const bedChartRef = ref<HTMLDivElement | null>(null)
 const bodyStructureChartRef = ref<HTMLDivElement | null>(null)
 const drugChartRef = ref<HTMLDivElement | null>(null)
 const flowChartRef = ref<HTMLDivElement | null>(null)
@@ -531,7 +530,6 @@ const markerPositions: Record<number, THREE.Vector3> = {
 }
 
 // ECharts 实例
-const bedChart: echarts.ECharts | null = null
 let bodyStructureChart: echarts.ECharts | null = null
 let drugChart: echarts.ECharts | null = null
 let flowChart: echarts.ECharts | null = null
@@ -1401,29 +1399,33 @@ const createHeartMarkers = () => {
     const marker = new THREE.Mesh(geometry, material)
     marker.position.copy(part.position)
     ;(marker as any).partId = id
-    heartModel.add(marker)
-    heartClickableMarkers.push(marker)
+    if (heartModel) {
+      heartModel.add(marker)
+      heartClickableMarkers.push(marker)
 
-    // 使用预设的标签位置（按左右阵列紧贴模型）
-    const labelPos = (() => {
-      const offsetX = part.align === 'right' ? heartLabelOffsetX : -heartLabelOffsetX
-      const offsetY = part.labelOffsetY || 0
-      return new THREE.Vector3(offsetX, part.position.y + offsetY, 0)
-    })()
-    
-    // 创建标签
-    if (heartLabelRenderer) {
-      const label = createHeartLabel(id, labelPos)
-      if (label) {
-        heartModel.add(label)
-        heartLabels.push(label)
+      // 使用预设的标签位置（按左右阵列紧贴模型）
+      const labelPos = (() => {
+        const offsetX = part.align === 'right' ? heartLabelOffsetX : -heartLabelOffsetX
+        const offsetY = part.labelOffsetY || 0
+        return new THREE.Vector3(offsetX, part.position.y + offsetY, 0)
+      })()
+      
+      // 创建标签
+      if (heartLabelRenderer) {
+        const label = createHeartLabel(id, labelPos)
+        if (label && heartModel) {
+          heartModel.add(label)
+          heartLabels.push(label)
+        }
+      }
+
+      // 创建连接线：从标签位置指向心脏部位
+      const line = createHeartLine(labelPos, part.position)
+      if (heartModel) {
+        heartModel.add(line)
+        heartLines.push(line)
       }
     }
-
-    // 创建连接线：从标签位置指向心脏部位
-    const line = createHeartLine(labelPos, part.position)
-    heartModel.add(line)
-    heartLines.push(line)
   })
 }
 
@@ -1613,6 +1615,7 @@ const initHeartModel = async () => {
 const initBedChart = () => {
   // 已替换为3D心脏模型，不再需要饼图
   return
+  /*
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
@@ -1698,7 +1701,10 @@ const initBedChart = () => {
       }
     ]
   }
-  bedChart.setOption(option)
+  if (bedChart) {
+    bedChart.setOption(option)
+  }
+  */
 }
 
 // 初始化身体结构分析图表（器官病例分布）
@@ -2082,18 +2088,17 @@ const handleResize = () => {
   // 使用 nextTick 确保 DOM 更新完成
   setTimeout(() => {
     try {
-  bedChart?.resize()
   bodyStructureChart?.resize()
   drugChart?.resize()
   flowChart?.resize()
   departmentChart?.resize()
   
   // 重新设置图表字体大小
-  if (bedChart) {
-    const bedOption = bedChart.getOption() as any
-        if (bedOption && bedOption.legend && bedOption.legend.textStyle) {
-    bedOption.legend.textStyle.fontSize = Math.max(9, baseFontSize.value * 0.65)
-    bedChart.setOption(bedOption)
+  if (bodyStructureChart) {
+    const option = bodyStructureChart.getOption() as any
+        if (option && option.legend && option.legend.textStyle) {
+    option.legend.textStyle.fontSize = Math.max(9, baseFontSize.value * 0.65)
+    bodyStructureChart.setOption(option)
   }
       }
     } catch (error) {
@@ -2166,7 +2171,6 @@ onUnmounted(() => {
     cancelAnimationFrame(heartAnimationId)
   }
   
-  bedChart?.dispose()
   bodyStructureChart?.dispose()
   drugChart?.dispose()
   flowChart?.dispose()
