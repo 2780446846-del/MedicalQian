@@ -4,7 +4,8 @@
     <view class="video-wrapper">
       <!-- 远程视频 -->
       <view v-if="isConnected" class="video-container" :change:prop="renderScript.updateRemoteStream" :prop="remoteStreamData">
-        <view id="remoteVideoWrapper" class="video-wrapper-inner"></view>
+        <!-- 医生的视频显示在这里 -->
+        <view id="remoteVideoWrapper" class="video-wrapper-inner"></view>  
       </view>
       
       <!-- 连接中 -->
@@ -137,6 +138,7 @@ const recentMessages = computed(() => {
 // 加入直播间
 const joinLive = async () => {
   try {
+    //显示连接状态
     isConnecting.value = true
     
     // 1. 初始化 WebRTC
@@ -195,6 +197,14 @@ const joinLive = async () => {
     
     webrtcViewer.onChatMessage = (senderId, senderName, message, timestamp) => {
       console.log('💬 收到聊天消息:', senderName, message)
+      
+      // 如果是自己发送的消息，不重复添加（因为发送时已经添加了）
+      if (senderId === viewerId.value) {
+        console.log('跳过自己的消息（已在发送时添加）')
+        return
+      }
+      
+      // 添加其他人的消息
       messages.value.push({
         id: messageId++,
         username: senderName,
@@ -281,8 +291,19 @@ const sendMessage = () => {
     return
   }
   
-  // 通过 WebSocket 发送消息
-  webrtcViewer.sendChatMessage(inputMessage.value.trim())
+  const messageContent = inputMessage.value.trim()
+  
+  // 立即显示自己的消息（不等待服务器广播）
+  messages.value.push({
+    id: messageId++,
+    username: viewerName.value,
+    content: messageContent,
+    timestamp: Date.now(),
+    isSelf: true // 标记是自己发送的
+  })
+  
+  // 通过 WebSocket 发送消息给服务器
+  webrtcViewer.sendChatMessage(messageContent)
   
   // 清空输入框
   inputMessage.value = ''
@@ -346,8 +367,53 @@ export default {
         return
       }
       
-      console.log('找到 wrapper，创建 video 元素')
+      console.log('找到 wrapper，准备显示视频')
+      
+      // 如果已经有视频元素，只更新流和静音状态
+      if (remoteVideoElement && remoteVideoElement.parentNode === wrapper) {
+        console.log('更新现有视频元素')
+        
+        // 先暂停
+        remoteVideoElement.pause()
+        
+        // 更新流
+        remoteVideoElement.srcObject = stream
+        remoteVideoElement.muted = muted || false
+        
+        // 重新播放
+        setTimeout(() => {
+          remoteVideoElement.play().then(() => {
+            console.log('✅ 视频更新并播放成功')
+          }).catch(err => {
+            console.error('❌ 播放失败:', err)
+            // 尝试静音播放
+            remoteVideoElement.muted = true
+            remoteVideoElement.play().catch(err2 => {
+              console.error('❌ 静音播放也失败:', err2)
+            })
+          })
+        }, 100)
+        
+        return
+      }
+      
+      // 清理旧元素
+      if (remoteVideoElement) {
+        console.log('清理旧的视频元素')
+        try {
+          remoteVideoElement.pause()
+          remoteVideoElement.srcObject = null
+        } catch (e) {
+          console.warn('清理旧元素时出错:', e)
+        }
+        remoteVideoElement = null
+      }
+      
+      // 清空容器
       wrapper.innerHTML = ''
+      
+      // 创建新的视频元素
+      console.log('创建新的视频元素')
       remoteVideoElement = document.createElement('video')
       remoteVideoElement.setAttribute('autoplay', 'true')
       remoteVideoElement.setAttribute('playsinline', 'true')
@@ -357,21 +423,34 @@ export default {
       remoteVideoElement.style.objectFit = 'cover'
       remoteVideoElement.style.background = '#000'
       
-      // 直接设置 srcObject
-      remoteVideoElement.srcObject = stream
+      // 添加错误处理
+      remoteVideoElement.onerror = (e) => {
+        console.error('视频元素错误:', e)
+      }
+      
+      // 先添加到 DOM
       wrapper.appendChild(remoteVideoElement)
       
-      // 尝试播放
-      remoteVideoElement.play().then(() => {
-        console.log('✅ 远程视频播放成功')
-      }).catch(err => {
-        console.error('❌ 播放远程视频失败:', err)
-        // 尝试静音播放
-        remoteVideoElement.muted = true
-        remoteVideoElement.play().catch(err2 => {
-          console.error('❌ 静音播放也失败:', err2)
-        })
-      })
+      // 再设置流
+      remoteVideoElement.srcObject = stream
+      
+      // 延迟播放，避免 AbortError
+      setTimeout(() => {
+        if (remoteVideoElement && remoteVideoElement.parentNode) {
+          remoteVideoElement.play().then(() => {
+            console.log('✅ 远程视频播放成功')
+          }).catch(err => {
+            console.error('❌ 播放远程视频失败:', err)
+            // 尝试静音播放
+            if (remoteVideoElement) {
+              remoteVideoElement.muted = true
+              remoteVideoElement.play().catch(err2 => {
+                console.error('❌ 静音播放也失败:', err2)
+              })
+            }
+          })
+        }
+      }, 100)
       
       console.log('✅ 远程视频元素已添加到 DOM')
     }

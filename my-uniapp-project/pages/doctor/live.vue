@@ -4,9 +4,10 @@
     <view class="camera-wrapper">
       <!-- 视频预览 - 使用renderjs操作原生video -->
       <view v-if="isLiving" class="video-container" :change:prop="renderScript.updateStream" :prop="streamData">
+        <!--视频显示在这里 -->
         <view id="videoWrapper" class="video-wrapper-inner"></view>
       </view>
-      
+
       <!-- 直播中的覆盖层 -->
       <view v-if="isLiving" class="live-overlay">
         <!-- 顶部信息栏 -->
@@ -22,9 +23,10 @@
               <text class="badge-text">直播中</text>
             </view>
           </view>
-          
+
           <view class="top-actions">
             <view class="viewer-count">
+              <!-- 观众数量 -->
               <text class="count-text">👥 {{ viewerCount }}</text>
             </view>
           </view>
@@ -41,7 +43,7 @@
             <text class="tool-icon">🔄</text>
             <text class="tool-text">翻转</text>
           </view>
-          
+
           <view class="tool-item">
             <text class="tool-icon">❤️</text>
             <text class="tool-text">{{ likeCount }}</text>
@@ -50,11 +52,7 @@
 
         <!-- 模拟聊天消息 -->
         <view class="chat-messages">
-          <view
-            v-for="msg in recentMessages"
-            :key="msg.id"
-            class="message-item"
-          >
+          <view v-for="msg in recentMessages" :key="msg.id" class="message-item">
             <text class="username">{{ msg.username }}：</text>
             <text class="content">{{ msg.content }}</text>
           </view>
@@ -74,23 +72,22 @@
           </view>
         </view>
       </view>
-    </view>
+    </view>- isLiving：是否正在直播（true/false）
+    - viewerCount：观众数量
+    - recentMessages：最近的3条聊天消息
+    - videoWrapper：视频显示的容器
+
 
     <!-- 底部控制栏 -->
     <view class="bottom-bar">
       <view v-if="!isLiving" class="start-section">
-        <input
-          v-model="liveTitle"
-          class="title-input"
-          placeholder="输入直播主题（如：心血管健康科普）"
-          maxlength="30"
-        />
+        <input v-model="liveTitle" class="title-input" placeholder="输入直播主题（如：心血管健康科普）" maxlength="30" />
         <button class="start-btn" @click="startLive">
           <text class="btn-icon">🎬</text>
           <text>开始直播</text>
         </button>
       </view>
-      
+
       <view v-else class="living-section">
         <view class="live-stats">
           <view class="stat-item">
@@ -100,8 +97,8 @@
           <view class="stat-item">
             <text class="stat-icon">💬</text>
             <text class="stat-text">{{ messages.length }}条消息</text>
-      </view>
-    </view>
+          </view>
+        </view>
 
         <button class="end-btn" @click="endLive">
           <text class="btn-icon">⏹️</text>
@@ -160,11 +157,13 @@ let messageTimer: any = null
 let likeTimer: any = null
 
 // 格式化直播时长
+//将传入的总秒数比如3661秒 格式化为HH:MM:SS 或 MM:SS格式的字符串
+//用整除和取模运算拆分出小时、分钟、秒
 const formatLiveTime = (seconds: number) => {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   const secs = seconds % 60
-  
+
   if (hours > 0) {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
@@ -172,6 +171,7 @@ const formatLiveTime = (seconds: number) => {
 }
 
 // 更新直播时长
+//通过定时器每秒更新一次直播时长，并调用formatLiveTime格式化后更新到页面变量
 const updateLiveTime = () => {
   liveTimer = setInterval(() => {
     const elapsed = Math.floor((Date.now() - liveStartTime) / 1000)
@@ -180,9 +180,11 @@ const updateLiveTime = () => {
 }
 
 // 检测可用的摄像头
+//调用浏览器API检测设备上的可用摄像头，并判断是否存在多个摄像头
 const detectCameras = async () => {
   try {
     // @ts-ignore
+    //enumerateDevices API 用于枚举音视频输入输出设备
     if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
       // @ts-ignore
       const devices = await navigator.mediaDevices.enumerateDevices()
@@ -204,27 +206,27 @@ const startLive = async () => {
     })
     return
   }
-  
+
   try {
     // 检测摄像头
     await detectCameras()
-    
+
     // 显示加载提示
     uni.showLoading({
       title: '正在获取摄像头...',
       mask: true
     })
-    
+
     // 1. 先触发renderjs获取摄像头（等待摄像头流准备好）
     isLiving.value = true
-    streamData.value = { 
-      action: 'start', 
+    streamData.value = {
+      action: 'start',
       position: devicePosition.value
     }
-    
+
     // 注意：WebRTC 初始化将在 setWebRTCStream 中完成（摄像头流准备好后）
     console.log('⏳ 等待摄像头流准备...')
-    
+
     // 安全机制：10秒后如果还没有收到流，隐藏加载提示
     setTimeout(() => {
       if (!currentStream) {
@@ -240,7 +242,7 @@ const startLive = async () => {
         })
       }
     }, 10000)
-    
+
   } catch (error) {
     console.error('开始直播失败:', error)
     uni.hideLoading()
@@ -263,36 +265,36 @@ const endLive = () => {
       if (res.confirm) {
         // 停止摄像头
         streamData.value = { action: 'stop', position: devicePosition.value }
-        
+
         // 关闭 WebRTC 连接
         if (webrtcDoctor) {
           webrtcDoctor.closeRoom()
           webrtcDoctor = null
         }
-        
+
         isLiving.value = false
-        
+
         // 清除定时器
         if (liveTimer) clearInterval(liveTimer)
         if (viewerTimer) clearInterval(viewerTimer)
         if (messageTimer) clearInterval(messageTimer)
         if (likeTimer) clearInterval(likeTimer)
-        
+
         // 重置数据
         liveTime.value = '00:00'
         const finalViewers = viewerCount.value
         const finalLikes = likeCount.value
         const finalMessages = messages.value.length
-        
+
         viewerCount.value = 0
         likeCount.value = 0
         messages.value = []
-        
+
         uni.showToast({
           title: '直播已结束',
           icon: 'success'
         })
-        
+
         // 显示直播统计
         setTimeout(() => {
           uni.showModal({
@@ -309,11 +311,11 @@ const endLive = () => {
 // 切换摄像头
 const switchCamera = async () => {
   if (!isLiving.value || !hasMultipleCameras.value) return
-  
+
   // 切换摄像头方向
   devicePosition.value = devicePosition.value === 'user' ? 'environment' : 'user'
   streamData.value = { action: 'switch', position: devicePosition.value }
-  
+
   uni.showToast({
     title: '摄像头已切换',
     icon: 'none'
@@ -327,9 +329,9 @@ const setWebRTCStream = (stream: MediaStream) => {
   console.log('音频轨道数:', stream.getAudioTracks().length)
   console.log('流ID:', stream.id)
   console.log('流是否活跃:', stream.active)
-  
+
   currentStream = stream
-  
+
   // 使用 Promise 处理异步逻辑，但函数本身不是 async
   initWebRTCWithStream(stream).catch(error => {
     console.error('❌ 初始化 WebRTC 失败:', error)
@@ -343,21 +345,21 @@ const setWebRTCStream = (stream: MediaStream) => {
     isLiving.value = false
     streamData.value = { action: 'stop', position: devicePosition.value }
   })
-  
+
   return true // 返回值，让 renderjs 知道函数被调用了
 }
 
 // 使用流初始化 WebRTC（独立的异步函数）
 const initWebRTCWithStream = async (stream: MediaStream) => {
   console.log('🚀 开始初始化 WebRTC...')
-  
+
   // 1. 初始化 WebRTC
   webrtcDoctor = new WebRTCDoctor()
-  
+
   // 2. 立即设置本地流（在创建直播间之前！）
   webrtcDoctor.setLocalStream(stream)
   console.log('✅ 本地流已设置到 WebRTC')
-  
+
   // 3. 设置回调
   webrtcDoctor.onRoomCreated = (roomId) => {
     console.log('✅ 直播间创建成功:', roomId)
@@ -367,7 +369,7 @@ const initWebRTCWithStream = async (stream: MediaStream) => {
       icon: 'success'
     })
   }
-  
+
   webrtcDoctor.onViewerJoined = (viewerId, viewerName, count) => {
     console.log('👤 观众加入:', viewerName)
     viewerCount.value = count
@@ -377,7 +379,7 @@ const initWebRTCWithStream = async (stream: MediaStream) => {
       content: `${viewerName} 加入了直播间`
     })
   }
-  
+
   webrtcDoctor.onViewerLeft = (viewerId, viewerName, count) => {
     console.log('👋 观众离开:', viewerName)
     viewerCount.value = count
@@ -387,7 +389,7 @@ const initWebRTCWithStream = async (stream: MediaStream) => {
       content: `${viewerName} 离开了直播间`
     })
   }
-  
+
   webrtcDoctor.onError = (error) => {
     console.error('❌ WebRTC 错误:', error)
     uni.showToast({
@@ -395,7 +397,7 @@ const initWebRTCWithStream = async (stream: MediaStream) => {
       icon: 'none'
     })
   }
-  
+
   webrtcDoctor.onChatMessage = (senderId, senderName, message, timestamp) => {
     console.log('💬 收到聊天消息:', senderName, message)
     messages.value.push({
@@ -405,23 +407,23 @@ const initWebRTCWithStream = async (stream: MediaStream) => {
       timestamp
     })
   }
-  
+
   // 4. 连接信令服务器
   console.log('🔌 连接信令服务器...')
   await webrtcDoctor.connect(WEBRTC_CONFIG.SIGNAL_SERVER)
-  
+
   // 5. 创建直播间（现在本地流已经准备好了）
   const roomId = 'room_' + Date.now()
   const doctorId = 'doctor_' + Date.now()
   console.log('🏠 创建直播间:', roomId)
   await webrtcDoctor.createRoom(roomId, doctorId, doctorInfo.value.name, liveTitle.value)
-  
-  // 6. 开始计时和模拟数据
+
+  // 6. 开始计时
   liveStartTime = Date.now()
   updateLiveTime()
-  startReceiveMessages()
+  // startReceiveMessages() 
   startReceiveLikes()
-  
+
   console.log('🎉 直播启动完成！本地流已准备好，观众可以正常观看了')
 }
 
@@ -457,7 +459,7 @@ const startReceiveMessages = () => {
     '讲得很专业',
     '通俗易懂'
   ]
-  
+
   messageTimer = setInterval(() => {
     if (Math.random() > 0.3) {
       const newMessage = {
@@ -466,7 +468,7 @@ const startReceiveMessages = () => {
         content: contents[Math.floor(Math.random() * contents.length)]
       }
       messages.value.push(newMessage)
-      
+
       // 限制消息数量
       if (messages.value.length > 100) {
         messages.value.shift()
@@ -486,7 +488,7 @@ const startReceiveLikes = () => {
 
 onMounted(() => {
   console.log('直播页面已加载')
-  
+
   // 监听来自 renderjs 的视频流事件
   uni.$on('webrtc-stream-ready', (stream: MediaStream) => {
     console.log('📹 通过事件接收到视频流')
@@ -497,16 +499,16 @@ onMounted(() => {
 onUnmounted(() => {
   // 移除事件监听
   uni.$off('webrtc-stream-ready')
-  
+
   // 停止摄像头
   streamData.value = { action: 'stop', position: devicePosition.value }
-  
+
   // 关闭 WebRTC 连接
   if (webrtcDoctor) {
     webrtcDoctor.closeRoom()
     webrtcDoctor = null
   }
-  
+
   // 清除所有定时器
   if (liveTimer) clearInterval(liveTimer)
   if (viewerTimer) clearInterval(viewerTimer)
@@ -704,8 +706,8 @@ export default {
   bottom: 0;
   pointer-events: none;
   z-index: 10;
-  
-  > * {
+
+  >* {
     pointer-events: auto;
   }
 }
@@ -776,10 +778,13 @@ export default {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
+
   50% {
     opacity: 0.5;
     transform: scale(0.8);
@@ -980,7 +985,7 @@ export default {
   font-weight: bold;
   border-radius: 40rpx;
   border: none;
-  
+
   &::after {
     border: none;
   }
@@ -1031,7 +1036,7 @@ export default {
   font-weight: bold;
   border-radius: 40rpx;
   border: none;
-  
+
   &::after {
     border: none;
   }
