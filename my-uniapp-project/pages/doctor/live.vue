@@ -123,11 +123,11 @@ const liveTitle = ref('')
 const devicePosition = ref('user') // user 前置, environment 后置
 const streamData = ref({ action: '', position: 'user' }) // 用于触发renderjs
 const hasMultipleCameras = ref(false) // 是否有多个摄像头
-let availableCameras: any[] = [] // 可用的摄像头列表
+let availableCameras = [] // 可用的摄像头列表
 
 // WebRTC 实例
-let webrtcDoctor: WebRTCDoctor | null = null
-let currentStream: MediaStream | null = null
+let webrtcDoctor = null
+let currentStream = null
 
 // 医生信息
 const doctorInfo = ref({
@@ -143,7 +143,7 @@ const viewerCount = ref(0)
 const likeCount = ref(0)
 
 // 聊天消息
-const messages = ref<any[]>([])
+const messages = ref([])
 let messageId = 1
 
 // 最近的3条消息
@@ -154,13 +154,13 @@ const recentMessages = computed(() => {
 // 直播时长
 const liveTime = ref('00:00')
 let liveStartTime = 0
-let liveTimer: any = null
-let viewerTimer: any = null
-let messageTimer: any = null
-let likeTimer: any = null
+let liveTimer = null
+let viewerTimer = null
+let messageTimer = null
+let likeTimer = null
 
 // 格式化直播时长
-const formatLiveTime = (seconds: number) => {
+const formatLiveTime = (seconds) => {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   const secs = seconds % 60
@@ -186,7 +186,7 @@ const detectCameras = async () => {
     if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
       // @ts-ignore
       const devices = await navigator.mediaDevices.enumerateDevices()
-      availableCameras = devices.filter((device: any) => device.kind === 'videoinput')
+      availableCameras = devices.filter((device) => device.kind === 'videoinput')
       hasMultipleCameras.value = availableCameras.length > 1
       console.log('检测到摄像头数量:', availableCameras.length)
     }
@@ -321,7 +321,7 @@ const switchCamera = async () => {
 }
 
 // 接收来自 renderjs 的视频流（用于 WebRTC）
-const setWebRTCStream = (stream: MediaStream) => {
+const setWebRTCStream = (stream) => {
   console.log('📹 收到来自 renderjs 的视频流:', stream)
   console.log('视频轨道数:', stream.getVideoTracks().length)
   console.log('音频轨道数:', stream.getAudioTracks().length)
@@ -348,7 +348,7 @@ const setWebRTCStream = (stream: MediaStream) => {
 }
 
 // 使用流初始化 WebRTC（独立的异步函数）
-const initWebRTCWithStream = async (stream: MediaStream) => {
+const initWebRTCWithStream = async (stream) => {
   console.log('🚀 开始初始化 WebRTC...')
   
   // 1. 初始化 WebRTC
@@ -488,7 +488,7 @@ onMounted(() => {
   console.log('直播页面已加载')
   
   // 监听来自 renderjs 的视频流事件
-  uni.$on('webrtc-stream-ready', (stream: MediaStream) => {
+uni.$on('webrtc-stream-ready', (stream) => {
     console.log('📹 通过事件接收到视频流')
     setWebRTCStream(stream)
   })

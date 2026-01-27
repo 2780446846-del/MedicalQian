@@ -14,6 +14,7 @@ declare module 'vue' {
   export function reactive<T>(target: T): T
   export function defineComponent(options: any): any
   export type DefineComponent = any
+  export function nextTick(callback?: () => void): Promise<void>
 }
 
 declare module '*.vue' {
@@ -248,6 +249,17 @@ declare namespace uni {
   function canIUse(api: string): boolean
   function base64ToArrayBuffer(base64: string): ArrayBuffer
   function arrayBufferToBase64(buffer: ArrayBuffer): string
+  function nextTick(callback?: () => void): Promise<void>
+}
+
+// 扩展PageInstance类型
+declare module '@dcloudio/types' {
+  interface PageInstance {
+    $mp?: {
+      query?: any
+      page: any
+    }
+  }
 }
 
 // 全局声明

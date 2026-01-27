@@ -12,11 +12,12 @@
 </template>
 
 <script setup>
-import { ref, onLoad } from 'vue';
+import { ref } from 'vue';
 
 const webUrl = ref('');
 const title = ref('网页导航');
 
+// uni-app页面生命周期钩子，不需要从Vue导入
 onLoad((options) => {
   if (options.url) {
     webUrl.value = decodeURIComponent(options.url);

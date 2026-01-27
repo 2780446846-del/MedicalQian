@@ -116,7 +116,7 @@ const viewerId = ref('viewer_' + Date.now())
 const viewerName = ref('观众' + Math.floor(Math.random() * 1000))
 
 // WebRTC 实例
-let webrtcViewer: WebRTCViewer | null = null
+let webrtcViewer = null
 
 // 音频控制
 const isMuted = ref(false)
@@ -125,7 +125,7 @@ const isMuted = ref(false)
 const isLiked = ref(false)
 
 // 聊天消息
-const messages = ref<any[]>([])
+const messages = ref([])
 const inputMessage = ref('')
 let messageId = 1
 
@@ -292,10 +292,20 @@ onMounted(() => {
   // 从路由参数获取 roomId
   const pages = getCurrentPages()
   const currentPage = pages[pages.length - 1]
-  const options = currentPage.options as any
+  let options = {}
   
-  if (options.roomId) {
-    roomId.value = options.roomId
+  // 尝试多种方式获取路由参数，使用括号表示法避免TypeScript错误
+  if (currentPage['options']) {
+    options = currentPage['options']
+  } else if (currentPage['$mp'] && currentPage['$mp']['query']) {
+    options = currentPage['$mp']['query']
+  } else if (currentPage['$route'] && currentPage['$route']['query']) {
+    options = currentPage['$route']['query']
+  }
+  
+  // 检查roomId是否存在
+  if (options && options['roomId']) {
+    roomId.value = options['roomId']
     joinLive()
   } else {
     uni.showModal({

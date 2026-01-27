@@ -318,7 +318,10 @@ const submitConsult = async () => {
             symptomDescription: consultationData.symptomDescription,
             symptomImages: consultationData.symptomImages,
             createdBy: frontDeskUserId // 传递前台账号ID
-          }
+          },
+          needAuth: true,
+          showLoading: true,
+          showError: true
         })
         
         if (syncResponse.success && syncResponse.data) {
