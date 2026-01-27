@@ -1373,8 +1373,8 @@ const provinceBar3DOption = computed(() => {
       itemStyle: {
         color: (params: any) => {
           if (isTechMode) {
-            const color = techColors[params.dataIndex % techColors.length]
-            const darkColor = techDarkColors[params.dataIndex % techDarkColors.length]
+            const color = techColors[params.dataIndex % techColors.length] || '#00ff00'
+            const darkColor = techDarkColors[params.dataIndex % techDarkColors.length] || '#00cc00'
             return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: color },
               { offset: 0.5, color: darkColor },
@@ -1383,8 +1383,8 @@ const provinceBar3DOption = computed(() => {
           } else {
             const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#6C5CE7']
             const darkColors = ['#CC5555', '#3EA8A0', '#3595A5', '#CC8060', '#78B09C', '#C5B056', '#9572A4', '#6A9BB6', '#C5932D', '#5549B9']
-            const color = colors[params.dataIndex % colors.length]
-            const darkColor = darkColors[params.dataIndex % darkColors.length]
+            const color = colors[params.dataIndex % colors.length] || '#FF6B6B'
+            const darkColor = darkColors[params.dataIndex % darkColors.length] || '#CC5555'
             return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: color },
               { offset: 0.5, color: darkColor },
@@ -1535,8 +1535,8 @@ const provincePie3DOption = computed(() => {
             name: item.name,
             itemStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: techColors[index % techColors.length] },
-                { offset: 1, color: techDarkColors[index % techDarkColors.length] }
+                { offset: 0, color: techColors[index % techColors.length] || '#00ff00' },
+                { offset: 1, color: techDarkColors[index % techDarkColors.length] || '#00cc00' }
               ])
             }
           }
@@ -1548,8 +1548,8 @@ const provincePie3DOption = computed(() => {
             name: item.name,
             itemStyle: {
               color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                { offset: 0, color: colors[index % colors.length] },
-                { offset: 1, color: darkColors[index % darkColors.length] }
+                { offset: 0, color: colors[index % colors.length] || '#FF6B6B' },
+                { offset: 1, color: darkColors[index % darkColors.length] || '#CC5555' }
               ])
             }
           }
@@ -1617,7 +1617,7 @@ function toggleViewMode() {
 // 更新图表
 function updateCharts() {
   // 更新柱状图配置（用于数据大屏）
-  if (barChartOption.value) {
+  if (barChartOption.value && barChartOption.value.series && barChartOption.value.series[0]) {
     const patientData = patientTrend.value > 0 
       ? [120, 140, 160, 180, 200, 220, 240]
       : [240, 220, 200, 180, 160, 140, 120]
@@ -1625,7 +1625,7 @@ function updateCharts() {
   }
   
   // 更新折线图配置（用于数据大屏）
-  if (lineChartOption.value) {
+  if (lineChartOption.value && lineChartOption.value.series && lineChartOption.value.series[0]) {
     const appointmentData = appointmentTrend.value > 0
       ? [100, 120, 150, 180, 220, 280, 320]
       : [320, 280, 220, 180, 150, 120, 100]
@@ -1867,7 +1867,7 @@ function calculateLocationDistribution(patientsData: Patient[]) {
     
     for (const key of sortedKeys) {
       if (address.includes(key)) {
-        matchedProvince = provinceMap[key]
+        matchedProvince = provinceMap[key] || ''
         break
       }
     }
@@ -1959,7 +1959,7 @@ onMounted(async () => {
     } else {
       // 否则从列表中查找
       await fetchPatients()
-      const foundPatient = allPatients.value.find(p => 
+      const foundPatient = patients.value.find((p: Patient) => 
         (p._id && p._id === editId) || (p.id && p.id === editId)
       )
       if (foundPatient) {
@@ -2148,7 +2148,8 @@ async function addExamplePatients() {
         console.log(`✅ 创建患者成功: ${patientData.name}`)
       }
     } catch (error) {
-      console.error(`❌ 创建示例患者失败 (${examplePatients[i].name}):`, error)
+      const patientName = examplePatients[i]?.name || '未知患者'
+      console.error(`❌ 创建示例患者失败 (${patientName}):`, error)
       // 继续尝试创建下一个患者
     }
   }
@@ -2163,7 +2164,7 @@ async function addExamplePatients() {
 
 // 添加14条真实的患者数据
 async function add14Patients() {
-  const patients: Partial<Patient>[] = [
+  const patients: any[] = [
     { name: '张明', gender: '男', age: 32, phone: '13800138001', idCard: '110101199001011234', relation: '本人', address: '北京市朝阳区建国路88号', category: '成年人', treatmentPlan: '门诊', paymentStatus: '已支付' },
     { name: '李芳', gender: '女', age: 28, phone: '13800138002', idCard: '110101199205152345', relation: '配偶', address: '北京市海淀区中关村大街1号', category: '成年人', treatmentPlan: '住院', paymentStatus: '已支付' },
     { name: '王强', gender: '男', age: 65, phone: '13800138003', idCard: '110101195807203456', relation: '父亲', address: '北京市西城区西单北大街120号', category: '老年人', treatmentPlan: '门诊', paymentStatus: '待处理' },
@@ -2200,7 +2201,8 @@ async function add14Patients() {
         console.log(`✅ 创建患者成功: ${patientData.name}`)
       }
     } catch (error) {
-      console.error(`❌ 创建患者失败 (${patients[i].name}):`, error)
+      const patientName = patients[i]?.name || '未知患者'
+      console.error(`❌ 创建患者失败 (${patientName}):`, error)
     }
   }
   
@@ -2427,7 +2429,7 @@ async function importCSVFile(file: File) {
   }
 
   // 解析表头
-  const headers = parseCSVLine(lines[0])
+  const headers = parseCSVLine(lines[0] || '')
   const headerMap: Record<string, number> = {}
   headers.forEach((header, index) => {
     headerMap[header.trim()] = index
@@ -2466,7 +2468,7 @@ async function importCSVFile(file: File) {
   // 解析数据行
   const patientsToImport: Partial<Patient>[] = []
   for (let i = 1; i < lines.length; i++) {
-    const values = parseCSVLine(lines[i])
+    const values = parseCSVLine(lines[i] || '')
     if (values.length === 0) continue
 
     const patient: Partial<Patient> = {}
@@ -2475,7 +2477,7 @@ async function importCSVFile(file: File) {
     Object.keys(headerMap).forEach(headerKey => {
       const fieldKey = fieldMap[headerKey] || headerKey.toLowerCase()
       const valueIndex = headerMap[headerKey]
-      if (valueIndex < values.length) {
+      if (valueIndex !== undefined && valueIndex < values.length) {
         const value = values[valueIndex]?.trim()
         
         // 类型转换
@@ -2526,7 +2528,8 @@ async function importCSVFile(file: File) {
       }
     } catch (error) {
       failCount++
-      console.error(`❌ 导入患者失败 (${patientsToImport[i].name}):`, error)
+      const patientName = patientsToImport[i]?.name || '未知患者'
+      console.error(`❌ 导入患者失败 (${patientName}):`, error)
     }
   }
 
@@ -2581,7 +2584,15 @@ async function importExcelFile(file: File) {
     
     // 获取第一个工作表
     const firstSheetName = workbook.SheetNames[0]
+    if (!firstSheetName) {
+      alert('Excel文件格式错误，没有找到工作表')
+      return
+    }
     const worksheet = workbook.Sheets[firstSheetName]
+    if (!worksheet) {
+      alert('Excel文件格式错误，工作表不存在')
+      return
+    }
     
     // 转换为JSON
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][]
@@ -2592,6 +2603,10 @@ async function importExcelFile(file: File) {
     }
 
     // 解析表头
+    if (!jsonData[0]) {
+      alert('Excel文件格式错误，没有找到表头')
+      return
+    }
     const headers = jsonData[0].map((h: any) => String(h || '').trim())
     const headerMap: Record<string, number> = {}
     headers.forEach((header, index) => {
@@ -2637,11 +2652,11 @@ async function importExcelFile(file: File) {
       const patient: Partial<Patient> = {}
       
       // 映射字段
-      Object.keys(headerMap).forEach(headerKey => {
-        const fieldKey = fieldMap[headerKey] || headerKey.toLowerCase()
-        const valueIndex = headerMap[headerKey]
-        if (valueIndex < row.length) {
-          let value = row[valueIndex]
+    Object.keys(headerMap).forEach(headerKey => {
+      const fieldKey = fieldMap[headerKey] || headerKey.toLowerCase()
+      const valueIndex = headerMap[headerKey]
+      if (valueIndex !== undefined && valueIndex < row.length) {
+        let value = row[valueIndex]
           if (value !== null && value !== undefined) {
             value = String(value).trim()
             
@@ -2694,7 +2709,8 @@ async function importExcelFile(file: File) {
         }
       } catch (error) {
         failCount++
-        console.error(`❌ 导入患者失败 (${patientsToImport[i].name}):`, error)
+        const patientName = patientsToImport[i]?.name || '未知患者'
+        console.error(`❌ 导入患者失败 (${patientName}):`, error)
       }
     }
 

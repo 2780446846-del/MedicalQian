@@ -291,7 +291,7 @@
                       type="checkbox"
                       :checked="isModuleSelected(module)"
                       :indeterminate="isModuleIndeterminate(module)"
-                      @change="toggleModule(module, $event.target.checked)"
+                      @change="toggleModule(module, ($event.target as HTMLInputElement).checked)"
                       class="module-checkbox"
                     />
                     <strong>{{ module }}</strong>
@@ -358,7 +358,7 @@ interface Role {
 }
 
 const activeTab = ref<'permissions' | 'roles'>('permissions')
-const tabs = [
+const tabs: Array<{ key: 'permissions' | 'roles'; label: string }> = [
   { key: 'permissions', label: '权限管理' },
   { key: 'roles', label: '角色管理' }
 ]
@@ -444,10 +444,13 @@ const groupedPermissions = computed(() => {
   permissions.value
     .filter(p => p.status === 'active')
     .forEach(perm => {
-      if (!grouped[perm.module]) {
-        grouped[perm.module] = []
+      const module = perm.module
+      if (!grouped[module]) {
+        grouped[module] = []
       }
-      grouped[perm.module].push(perm)
+      if (grouped[module]) {
+        grouped[module].push(perm)
+      }
     })
   return grouped
 })

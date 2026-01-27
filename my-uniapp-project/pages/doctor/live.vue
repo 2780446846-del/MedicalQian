@@ -163,7 +163,7 @@ let likeTimer = null
 // 格式化直播时长
 //将传入的总秒数比如3661秒 格式化为HH:MM:SS 或 MM:SS格式的字符串
 //用整除和取模运算拆分出小时、分钟、秒
-const formatLiveTime = (seconds: number) => {
+const formatLiveTime = (seconds) => {
   const hours = Math.floor(seconds / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   const secs = seconds % 60
