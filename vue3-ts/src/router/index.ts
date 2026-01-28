@@ -275,8 +275,8 @@ router.beforeEach(async (to, from, next) => {
       if (requiredPermissions || requiredRoles) {
         // 检查角色
         if (requiredRoles && requiredRoles.length > 0) {
-          const roleCodes = requiredRoles.map(r => typeof r === 'string' ? r : r.code)
-          if (!hasRole(roleCodes)) {
+          // Role 类型已经是字符串联合类型，直接使用
+          if (!hasRole(requiredRoles)) {
             next({
               path: '/',
               query: { error: 'no_permission' },
@@ -287,8 +287,8 @@ router.beforeEach(async (to, from, next) => {
         
         // 检查权限
         if (requiredPermissions && requiredPermissions.length > 0) {
-          const permissionCodes = requiredPermissions.map(p => typeof p === 'string' ? p : p.code)
-          if (!hasPermission(permissionCodes, 'any')) {
+          // Permission 类型已经是字符串联合类型，直接使用
+          if (!hasPermission(requiredPermissions, 'any')) {
             next({
               path: '/',
               query: { error: 'no_permission' },

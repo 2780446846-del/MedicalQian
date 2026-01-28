@@ -64,7 +64,7 @@
         <text class="link" @click="openAgreement">《病例隐私协议》</text>
         ，家庭签署
       </view>
-      <button class="submit-btn" type="primary" @click="submitConsult">
+      <button class="submit-btn" type="submit" @click="submitConsult">
         立即咨询
       </button>
     </view>

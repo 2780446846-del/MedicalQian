@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
+import type { Role as RbacRole } from './rbac'
 
 // 扩展 Window 接口以支持自定义属性
 declare global {
@@ -386,10 +387,12 @@ export const useAuthStore = defineStore('auth', () => {
         try {
           const { useRbacStore } = await import('./rbac')
           const rbacStore = useRbacStore()
-          const role = typeof data.user.role === 'string' 
-            ? { id: '', code: data.user.role, name: data.user.role } 
-            : data.user.role
-          rbacStore.setRole(role as Role)
+          // 提取角色代码字符串，rbac store 需要字符串联合类型
+          const roleCode = typeof data.user.role === 'string' 
+            ? data.user.role 
+            : data.user.role.code
+          // 转换为 rbac 的 Role 类型（字符串联合类型）
+          rbacStore.setRole(roleCode as RbacRole)
         } catch (error) {
           // RBAC store 可能不存在，忽略错误
           console.warn('RBAC store 未找到，跳过角色同步:', error)

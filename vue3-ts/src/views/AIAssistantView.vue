@@ -58,7 +58,7 @@ const handleSendMessage = async (overrideMessage?: string | Event) => {
   if (overrideMessage instanceof Event) {
     overrideMessage = undefined;
   }
-  const content = overrideMessage ?? inputValue.value.trim();
+  const content = (overrideMessage ?? inputValue.value.trim()) as string;
   if (!content || loading.value) return;
 
   inputValue.value = '';
@@ -201,6 +201,11 @@ const handleDeleteSession = (sessionId: string) => {
   }
 };
 
+const handleSessionNameChange = (event: Event, sessionId: string) => {
+  const target = event.target as HTMLInputElement;
+  handleUpdateSessionName(sessionId, target.value);
+};
+
 const handleUpdateSessionName = (sessionId: string, newName: string) => {
   try {
     chatService.updateSessionName(sessionId, newName);
@@ -233,7 +238,11 @@ const toggleSymptom = (group: string, symptom: string) => {
 };
 
 const handleEmergencySubmit = () => {
-  const symptoms = Object.values(selectedSymptoms).flat();
+  const symptomsArray = Object.values(selectedSymptoms);
+  const symptoms: string[] = [];
+  for (const arr of symptomsArray) {
+    symptoms.push(...arr);
+  }
   if (symptoms.length === 0) {
     alert('请至少选择一个症状');
     return;
@@ -328,7 +337,7 @@ onMounted(() => {
                 :value="session.name"
                 class="session-name"
                 :class="{ active: currentSession?.id === session.id }"
-                @change="(e: Event) => handleUpdateSessionName(session.id, (e.target as HTMLInputElement).value)"
+                @change="handleSessionNameChange($event, session.id)"
               />
               <div class="session-actions">
                 <button
