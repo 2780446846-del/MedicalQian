@@ -43,6 +43,30 @@
         </view>
       </view>
 
+      <view class="item" @click="handleBindEmail">
+        <text>邮箱</text>
+        <view class="right">
+          <text class="desc">{{ emailDesc }}</text>
+          <uni-icons type="arrowright" size="18" color="#c0c4cc"></uni-icons>
+        </view>
+      </view>
+
+      <view class="item" @click="handleBindQQ">
+        <text>QQ 账号</text>
+        <view class="right">
+          <text class="desc">{{ qqDesc }}</text>
+          <uni-icons type="arrowright" size="18" color="#c0c4cc"></uni-icons>
+        </view>
+      </view>
+
+      <view class="item" @click="handleBindWeixin">
+        <text>微信</text>
+        <view class="right">
+          <text class="desc">{{ weixinDesc }}</text>
+          <uni-icons type="arrowright" size="18" color="#c0c4cc"></uni-icons>
+        </view>
+      </view>
+
       <view class="item">
         <text>修改密码</text>
         <uni-icons type="arrowright" size="18" color="#c0c4cc"></uni-icons>
@@ -66,13 +90,26 @@ export default {
       nickname: '用户昵称',
       gender: '保密',
       authStatus: '未认证',
-      // 默认手机号为空：非手机号登录时不显示演示号码
-      phone: ''
+      // 默认手机号/邮箱为空：非绑定状态不显示演示数据
+      phone: '',
+      email: '',
+      qqBound: false,
+      weixinBound: false,
+      bindingLoading: false
     };
   },
   computed: {
     phoneDesc() {
       return this.phone ? this.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') : '未绑定';
+    },
+    emailDesc() {
+      return this.email || '未绑定';
+    },
+    qqDesc() {
+      return this.qqBound ? '已绑定' : '未绑定';
+    },
+    weixinDesc() {
+      return this.weixinBound ? '已绑定' : '未绑定';
     },
     authStatusText() {
       // 根据认证状态返回对应的文字
@@ -84,46 +121,20 @@ export default {
     }
   },
   onShow() {
+    // 先从本地缓存快速显示，然后从后端拉取最新数据
     const app = getApp();
     app.globalData = app.globalData || {};
-
-    // 当前登录用户信息（来自后端/数据库）
     const userInfo = app.globalData.userInfo || uni.getStorageSync('userInfo') || {};
+    this.applyUserData(userInfo);
 
-    // 优先从本地存储读取 userProfile，用于头像、昵称等可编辑资料
-    let profile = {};
-    try {
-      const cached = uni.getStorageSync('userProfile');
-      if (cached && Object.keys(cached).length > 0) {
-        profile = cached;
-        app.globalData.userProfile = profile;
-      }
-    } catch (e) {
-      console.warn('读取本地存储失败:', e);
-    }
-
-    // 如果本地没有，再从全局数据里兜底
-    if (!profile || Object.keys(profile).length === 0) {
-      profile = app.globalData.userProfile || {};
-    }
-    
-    // 更新页面数据：优先使用后端数据库中的资料，其次使用本地缓存
-    this.avatarUrl = userInfo.avatarUrl || profile.avatarUrl || this.avatarUrl;
-    this.nickname = userInfo.nickname || profile.nickname || this.nickname;
-    this.gender = userInfo.gender || profile.gender || this.gender;
-    // 手机号优先使用后端返回的 phone 字段，其次使用本地 profile 中的记录，否则为空
-    this.phone = userInfo.phone || profile.phone || '';
-    this.authStatus = userInfo.authStatus || profile.authStatus || this.authStatus;
-    
-    // 兜底头像
-    if (!this.avatarUrl || this.avatarUrl === '/static/logo.png') {
-      this.avatarUrl = 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar';
-    }
+    // 从后端拉取最新用户数据（包含所有绑定字段）
+    this.fetchLatestUserInfo();
   },
   methods: {
     async saveProfile() {
       const app = getApp();
       app.globalData = app.globalData || {};
+
       
       // 保留已有的认证信息（如果存在）
       const existingProfile = app.globalData.userProfile || {};
@@ -135,6 +146,8 @@ export default {
         nickname: this.nickname,
         gender: this.gender,
         phone: this.phone,
+        email: this.email,
+        qqOpenId: this.qqBound ? '已绑定' : '',
         authStatus: this.authStatus || existingProfile.authStatus || '未认证'
       };
 
@@ -146,16 +159,13 @@ export default {
         const updateData = {
           avatarUrl: this.avatarUrl ? String(this.avatarUrl) : '',
           nickname: this.nickname ? String(this.nickname).trim() : '',
-          gender: this.gender ? String(this.gender) : '保密',
-          phone: this.phone ? String(this.phone).trim() : ''
+          gender: this.gender ? String(this.gender) : '保密'
         };
 
         console.log('📤 准备保存到服务器:', {
-          avatarUrl: updateData.avatarUrl ? (updateData.avatarUrl.length > 50 ? `${updateData.avatarUrl.substring(0, 50)}...` : updateData.avatarUrl) : '(空)',
+          avatarUrl: updateData.avatarUrl ? '已设置' : '(空)',
           nickname: updateData.nickname || '(空)',
-          gender: updateData.gender || '(空)',
-          phone: updateData.phone ? (updateData.phone.length >= 11 ? `${updateData.phone.substring(0, 3)}****${updateData.phone.substring(7)}` : updateData.phone) : '(空)',
-          dataKeys: Object.keys(updateData)
+          gender: updateData.gender || '(空)'
         });
 
         const res = await request({
@@ -173,11 +183,7 @@ export default {
         const updated = res.data || {};
         app.globalData.userInfo = {
           ...(app.globalData.userInfo || {}),
-          avatarUrl: updated.avatarUrl,
-          nickname: updated.nickname,
-          gender: updated.gender,
-          phone: updated.phone,
-          authStatus: updated.authStatus
+          ...updated
         };
 
         uni.setStorageSync('userInfo', app.globalData.userInfo);
@@ -188,23 +194,14 @@ export default {
           const allProfiles = uni.getStorageSync('userProfilesById') || {};
           allProfiles[userId] = {
             ...(allProfiles[userId] || {}),
-            avatarUrl: updated.avatarUrl || mergedProfile.avatarUrl,
-            nickname: updated.nickname || mergedProfile.nickname,
-            gender: updated.gender || mergedProfile.gender,
-            phone: updated.phone || mergedProfile.phone,
-            authStatus: updated.authStatus || mergedProfile.authStatus
+            ...updated
           };
           uni.setStorageSync('userProfilesById', allProfiles);
           app.globalData.userProfile = allProfiles[userId];
           uni.setStorageSync('userProfile', allProfiles[userId]);
         }
 
-        console.log('✅ 服务器返回的更新后数据:', {
-          avatarUrl: updated.avatarUrl ? '已设置' : '未设置',
-          nickname: updated.nickname || '未设置',
-          gender: updated.gender || '未设置',
-          phone: updated.phone || '未设置'
-        });
+        console.log('✅ 服务器返回的更新后数据:', Object.keys(updated));
 
         uni.showToast({
           title: '更新成功',
@@ -293,25 +290,304 @@ export default {
         }
       });
     },
-    editPhone() {
-      uni.showModal({
-        title: '修改手机号',
-        editable: true,
-        placeholderText: this.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2'),
-        success: (res) => {
-          if (res.confirm && res.content) {
-            const val = res.content.trim();
-            const valid = /^1\d{10}$/.test(val);
-            if (!valid) {
-              uni.showToast({ title: '请输入11位手机号', icon: 'none' });
-              return;
-            }
-            this.phone = val;
-            this.saveProfile();
-            uni.showToast({ title: '手机号已更新', icon: 'none' });
-          }
+    async editPhone() {
+      await this.handleBindPhone();
+    },
+    async handleBindPhone() {
+      if (this.bindingLoading) return;
+      this.bindingLoading = true;
+      try {
+        const phone = await this.promptInput('绑定手机号', this.phone || '请输入11位手机号');
+        if (!phone) return;
+        const trimmed = phone.trim();
+        if (!/^1[3-9]\d{9}$/.test(trimmed)) {
+          uni.showToast({ title: '请输入正确的手机号', icon: 'none' });
+          return;
         }
+
+        const sendRes = await request({
+          url: '/auth/send-code',
+          method: 'POST',
+          data: { phone: trimmed, type: 'bind_phone' },
+          needAuth: true,
+          showLoading: true,
+          showError: false
+        });
+        const autoCode = sendRes?.code || '';
+        uni.showToast({ title: '验证码已发送', icon: 'none' });
+
+        const code = await this.promptInput('短信验证码', autoCode || '请输入6位验证码');
+        if (!code) return;
+        const trimmedCode = code.trim();
+        if (trimmedCode.length !== 6) {
+          uni.showToast({ title: '请输入6位验证码', icon: 'none' });
+          return;
+        }
+
+        const bindRes = await request({
+          url: '/auth/bind/phone',
+          method: 'POST',
+          data: { phone: trimmed, code: trimmedCode },
+          needAuth: true,
+          showLoading: true,
+          showError: false
+        });
+
+        if (!bindRes?.success) {
+          throw new Error(bindRes?.message || '绑定失败');
+        }
+
+        const updatedPhone = bindRes?.data?.phone || trimmed;
+        this.phone = updatedPhone;
+        await this.syncUserInfo({ phone: updatedPhone });
+        uni.showToast({ title: '手机号绑定成功', icon: 'success' });
+      } catch (error) {
+        if (error?.errMsg?.includes('cancel')) return;
+        console.error('绑定手机号失败', error);
+        uni.showToast({ title: error?.message || error?.msg || '绑定失败', icon: 'none' });
+      } finally {
+        this.bindingLoading = false;
+      }
+    },
+    async handleBindEmail() {
+      if (this.bindingLoading) return;
+      try {
+        const email = await this.promptInput('绑定邮箱', this.email || '请输入邮箱地址');
+        if (!email) return;
+        const trimmed = email.trim().toLowerCase();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(trimmed)) {
+          uni.showToast({ title: '请输入有效邮箱', icon: 'none' });
+          return;
+        }
+
+        await request({
+          url: '/auth/send-email-code',
+          method: 'POST',
+          data: { email: trimmed, type: 'bind_email' },
+          needAuth: false,
+          showLoading: true,
+          showError: false
+        });
+        uni.showToast({ title: '验证码已发送', icon: 'none' });
+
+        const code = await this.promptInput('邮箱验证码', '请输入6位验证码');
+        if (!code) return;
+        if (code.trim().length !== 6) {
+          uni.showToast({ title: '请输入6位验证码', icon: 'none' });
+          return;
+        }
+
+        this.bindingLoading = true;
+        await request({
+          url: '/auth/bind/email',
+          method: 'POST',
+          data: { email: trimmed, code: code.trim() },
+          needAuth: true
+        });
+
+        this.email = trimmed;
+        await this.syncUserInfo({ email: trimmed });
+        uni.showToast({ title: '邮箱绑定成功', icon: 'success' });
+      } catch (error) {
+        if (error?.errMsg?.includes('cancel')) return;
+        uni.showToast({ title: error?.message || '绑定失败', icon: 'none' });
+      } finally {
+        this.bindingLoading = false;
+      }
+    },
+    async handleBindQQ() {
+      if (this.bindingLoading) return;
+      // #ifndef APP-PLUS
+      uni.showToast({ title: 'QQ 绑定仅支持 App', icon: 'none' });
+      return;
+      // #endif
+      // #ifdef APP-PLUS
+      try {
+        this.bindingLoading = true;
+        const authRes = await new Promise((resolve, reject) => {
+          uni.login({ provider: 'qq', success: resolve, fail: reject });
+        });
+        const authResult = authRes?.authResult || {};
+        const accessToken = authResult.access_token || authResult.accessToken;
+        const openId = authResult.openid || authResult.openId;
+        if (!accessToken || !openId) {
+          throw new Error('未获取到 QQ 授权凭证');
+        }
+
+        let profile = {};
+        try {
+          const userInfoRes = await new Promise((resolve, reject) => {
+            uni.getUserInfo({ provider: 'qq', success: resolve, fail: reject });
+          });
+          profile = userInfoRes?.userInfo || {};
+        } catch (err) {
+          console.warn('获取 QQ 用户信息失败', err);
+        }
+
+        await request({
+          url: '/auth/bind/qq',
+          method: 'POST',
+          data: {
+            code: JSON.stringify({
+              accessToken,
+              openId,
+              profile: {
+                nickname: profile.nickname || profile.nickName,
+                avatar: profile.figureurl_qq_2 || profile.avatarUrl || profile.avatarUrlHd
+              }
+            })
+          },
+          needAuth: true,
+          showLoading: true
+        });
+
+        this.qqBound = true;
+        await this.syncUserInfo({ qqOpenId: openId, avatarUrl: profile.avatarUrl || profile.avatar });
+        uni.showToast({ title: 'QQ 绑定成功', icon: 'success' });
+      } catch (error) {
+        if (error?.errMsg?.includes('cancel')) return;
+        uni.showToast({ title: error?.message || 'QQ 绑定失败', icon: 'none' });
+      } finally {
+        this.bindingLoading = false;
+      }
+      // #endif
+    },
+    promptInput(title, placeholder) {
+      return new Promise((resolve, reject) => {
+        uni.showModal({
+          title,
+          editable: true,
+          placeholderText: placeholder,
+          success: (res) => {
+            if (res.confirm) {
+              resolve(res.content || '');
+            } else {
+              reject(new Error('cancel'));
+            }
+          },
+          fail: reject
+        });
       });
+    },
+    applyUserData(data) {
+      if (!data) return;
+      this.avatarUrl = data.avatarUrl || this.avatarUrl;
+      this.nickname = data.nickname || this.nickname;
+      this.gender = data.gender || this.gender;
+      this.phone = data.phone || '';
+      this.email = data.email || '';
+      this.qqBound = Boolean(data.qqOpenId);
+      this.weixinBound = Boolean(data.weixinOpenId);
+      this.authStatus = data.authStatus || '未认证';
+      if (!this.avatarUrl || this.avatarUrl === '/static/logo.png') {
+        this.avatarUrl = 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar';
+      }
+    },
+    async fetchLatestUserInfo() {
+      try {
+        const res = await request({
+          url: '/auth/me',
+          method: 'GET',
+          needAuth: true,
+          showLoading: false,
+          showError: false
+        });
+        if (res?.success && res?.user) {
+          const userData = res.user;
+          this.applyUserData(userData);
+          // 同步到全局和本地存储
+          const app = getApp();
+          app.globalData = app.globalData || {};
+          app.globalData.userInfo = { ...(app.globalData.userInfo || {}), ...userData };
+          uni.setStorageSync('userInfo', app.globalData.userInfo);
+          console.log('✅ 已从服务器拉取最新用户数据，绑定状态:', {
+            phone: !!userData.phone,
+            email: !!userData.email,
+            qq: !!userData.qqOpenId,
+            weixin: !!userData.weixinOpenId
+          });
+        }
+      } catch (e) {
+        console.warn('拉取最新用户信息失败:', e);
+      }
+    },
+    async handleBindWeixin() {
+      if (this.bindingLoading) return;
+      // #ifndef APP-PLUS
+      uni.showToast({ title: '微信绑定仅支持 App', icon: 'none' });
+      return;
+      // #endif
+      // #ifdef APP-PLUS
+      try {
+        this.bindingLoading = true;
+        const isInstalled = plus.runtime.isApplicationExist
+          ? plus.runtime.isApplicationExist({ pname: 'com.tencent.mm', action: 'weixin://' })
+          : true;
+        if (!isInstalled) {
+          throw new Error('请先安装微信客户端');
+        }
+        const authRes = await new Promise((resolve, reject) => {
+          uni.login({ provider: 'weixin', success: resolve, fail: reject });
+        });
+        const authResult = authRes?.authResult || {};
+        const accessToken = authResult.access_token || authResult.accessToken;
+        const openId = authResult.openid || authResult.openId || authResult.unionid;
+        if (!openId) {
+          throw new Error('未获取到微信授权凭证');
+        }
+
+        let profile = {};
+        try {
+          const userInfoRes = await new Promise((resolve, reject) => {
+            uni.getUserInfo({ provider: 'weixin', success: resolve, fail: reject });
+          });
+          profile = userInfoRes?.userInfo || {};
+        } catch (err) {
+          console.warn('获取微信用户信息失败', err);
+        }
+
+        const bindRes = await request({
+          url: '/auth/bind/weixin',
+          method: 'POST',
+          data: {
+            code: JSON.stringify({
+              accessToken,
+              openId,
+              profile: {
+                nickname: profile.nickName || profile.nickname,
+                avatar: profile.avatarUrl || profile.headimgurl
+              }
+            })
+          },
+          needAuth: true,
+          showLoading: true
+        });
+
+        if (!bindRes?.success) {
+          throw new Error(bindRes?.message || '微信绑定失败');
+        }
+
+        this.weixinBound = true;
+        await this.syncUserInfo({ weixinOpenId: openId });
+        uni.showToast({ title: '微信绑定成功', icon: 'success' });
+      } catch (error) {
+        if (error?.errMsg?.includes('cancel')) return;
+        uni.showToast({ title: error?.message || '微信绑定失败', icon: 'none' });
+      } finally {
+        this.bindingLoading = false;
+      }
+      // #endif
+    },
+    async syncUserInfo(partial = {}) {
+      const app = getApp();
+      app.globalData = app.globalData || {};
+      const merged = {
+        ...(app.globalData.userInfo || {}),
+        ...partial
+      };
+      app.globalData.userInfo = merged;
+      uni.setStorageSync('userInfo', merged);
     },
     goRealname() {
       uni.navigateTo({ url: '/pages/settings/realname/realname' });
