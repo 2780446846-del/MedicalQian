@@ -239,7 +239,6 @@ export default {
       color: #000000;
       line-height: 1.5;
       display: -webkit-box;
-      display: box;
       -webkit-box-orient: vertical;
       box-orient: vertical;
       -webkit-line-clamp: 2;

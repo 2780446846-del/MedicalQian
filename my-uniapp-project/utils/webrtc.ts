@@ -366,7 +366,8 @@ export class WebRTCDoctor {
  * WebRTC 管理类 - 观众端（拉流）
  */
 export class WebRTCViewer {
-  private ws: WebSocket | null = null   //WebSocket连接
+  private ws: any = null   //uni.connectSocket 返回的 SocketTask
+  private wsConnected: boolean = false  //WebSocket 连接状态
   private pc: RTCPeerConnection | null = null  //WebRTC连接
   private roomId: string = ''  //直播间ID
   private viewerId: string = ''  //观众ID
@@ -396,26 +397,34 @@ export class WebRTCViewer {
   async connect(signalServer: string = WEBRTC_CONFIG.SIGNAL_SERVER): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(signalServer)
+        console.log('🔌 [Viewer] 连接信令服务器:', signalServer)
+        // @ts-ignore - uni 是 uni-app 全局对象
+        this.ws = uni.connectSocket({
+          url: signalServer,
+          complete: () => {}
+        })
 
-        this.ws.onopen = () => {
-          console.log('信令服务器连接成功')
+        this.ws.onOpen(() => {
+          console.log('✅ [Viewer] 信令服务器连接成功')
+          this.wsConnected = true
           resolve()
-        }
+        })
 
-        this.ws.onerror = (error) => {
-          console.error(' 信令服务器连接失败:', error)
+        this.ws.onError((error: any) => {
+          console.error('❌ [Viewer] 信令服务器连接失败:', error)
+          this.wsConnected = false
           reject(new Error('信令服务器连接失败'))
-        }
+        })
 
-        this.ws.onmessage = (event) => {
-          this.handleSignalMessage(JSON.parse(event.data))
-        }
+        this.ws.onMessage((res: any) => {
+          this.handleSignalMessage(JSON.parse(res.data))
+        })
 
-        this.ws.onclose = () => {
-          console.log('信令服务器连接已关闭')
+        this.ws.onClose(() => {
+          console.log('[Viewer] 信令服务器连接已关闭')
+          this.wsConnected = false
           this.cleanup()
-        }
+        })
       } catch (error) {
         reject(error)
       }
@@ -430,16 +439,16 @@ export class WebRTCViewer {
     this.viewerId = viewerId
     this.viewerName = viewerName
 
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.ws || !this.wsConnected) {
       throw new Error('信令服务器未连接')
     }
     //发送加入直播间的消息
-    this.ws.send(JSON.stringify({
+    this.wsSend({
       type: 'join-room',
       roomId,
       viewerId,
       viewerName
-    }))
+    })
   }
 
   /**
@@ -534,11 +543,11 @@ export class WebRTCViewer {
       this.pc.onicecandidate = (event) => {
         if (event.candidate && this.ws) {
           //将本地生成的ICE候选发送给医生端
-          this.ws.send(JSON.stringify({
+          this.wsSend({
             type: 'ice-candidate',
             roomId: this.roomId,
             candidate: event.candidate
-          }))
+          })
         }
       }
 
@@ -559,11 +568,11 @@ export class WebRTCViewer {
 
       // 发送 Answer
       if (this.ws) {
-        this.ws.send(JSON.stringify({
+        this.wsSend({
           type: 'answer',
           roomId: this.roomId,
           answer: this.pc.localDescription
-        }))
+        })
       }
 
       console.log('Answer 已发送')
@@ -591,18 +600,18 @@ export class WebRTCViewer {
    * 发送聊天消息
    */
   sendChatMessage(message: string): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.ws || !this.wsConnected) {
       console.error(' WebSocket 未连接，无法发送消息')
       return
     }
     //向信令服务器发送聊天信息，有服务器转发给所有人
-    this.ws.send(JSON.stringify({
+    this.wsSend({
       type: 'chat-message',
       roomId: this.roomId,
       senderId: this.viewerId,
       senderName: this.viewerName,
       message
-    }))
+    })
 
     console.log('发送聊天消息:', message)
   }
@@ -611,12 +620,12 @@ export class WebRTCViewer {
    * 离开直播间
    */
   leaveRoom(): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws && this.wsConnected) {
       //向信令服务器发送离开房间的消息
-      this.ws.send(JSON.stringify({
+      this.wsSend({
         type: 'leave-room',
         roomId: this.roomId
-      }))
+      })
     }
     this.cleanup()
   }
@@ -624,6 +633,17 @@ export class WebRTCViewer {
   /**
    * 清理资源
    */
+  /**
+   * 封装 WebSocket 发送（兼容 SocketTask）
+   */
+  private wsSend(data: any): void {
+    if (this.ws && this.wsConnected) {
+      this.ws.send({
+        data: JSON.stringify(data)
+      })
+    }
+  }
+
   private cleanup(): void {
     // 关闭 PeerConnection
     if (this.pc) {
@@ -633,11 +653,12 @@ export class WebRTCViewer {
 
     // 关闭 WebSocket
     if (this.ws) {
-      this.ws.close()
+      try { this.ws.close({}) } catch (e) { /* ignore */ }
       this.ws = null
     }
+    this.wsConnected = false
 
-    console.log('资源已清理')
+    console.log('[Viewer] 资源已清理')
 
     //主动离开直播间时，通知信令服务器并清理所有本地资源，避免内存泄漏和设备占用
   }

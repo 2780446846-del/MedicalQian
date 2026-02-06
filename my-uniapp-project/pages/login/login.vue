@@ -99,21 +99,21 @@
             <view class="divider-line"></view>
           </view>
           <view class="third-party-buttons">
-            <view class="third-party-item">
-              <view class="third-party-icon wechat">💬</view>
+            <view class="third-party-item" @click="handleWechatLogin">
+              <view class="third-party-icon wechat">微</view>
               <text class="third-party-text">微信</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon alipay">💰</view>
-              <text class="third-party-text">支付宝</text>
+            <view class="third-party-item" @click="showEmailLogin = true">
+              <view class="third-party-icon email">✉</view>
+              <text class="third-party-text">邮箱</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon qq">🐧</view>
-              <text class="third-party-text">QQ</text>
-            </view>
-            <view class="third-party-item">
-              <view class="third-party-icon douyin">🎵</view>
-              <text class="third-party-text">抖音</text>
+            <view 
+              class="third-party-item"
+              :class="{ disabled: qqLoginLoading }"
+              @click="handleQQLogin"
+            >
+              <view class="third-party-icon qq">Q</view>
+              <text class="third-party-text">{{ qqLoginLoading ? '登录中' : 'QQ' }}</text>
             </view>
           </view>
         </view>
@@ -194,21 +194,21 @@
             <view class="divider-line"></view>
           </view>
           <view class="third-party-buttons">
-            <view class="third-party-item">
-              <view class="third-party-icon wechat">💬</view>
+            <view class="third-party-item" @click="handleWechatLogin">
+              <view class="third-party-icon wechat">微</view>
               <text class="third-party-text">微信</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon alipay">💰</view>
-              <text class="third-party-text">支付宝</text>
+            <view class="third-party-item" @click="showEmailLogin = true">
+              <view class="third-party-icon email">✉</view>
+              <text class="third-party-text">邮箱</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon qq">🐧</view>
-              <text class="third-party-text">QQ</text>
-            </view>
-            <view class="third-party-item">
-              <view class="third-party-icon douyin">🎵</view>
-              <text class="third-party-text">抖音</text>
+            <view 
+              class="third-party-item"
+              :class="{ disabled: qqLoginLoading }"
+              @click="handleQQLogin"
+            >
+              <view class="third-party-icon qq">Q</view>
+              <text class="third-party-text">{{ qqLoginLoading ? '登录中' : 'QQ' }}</text>
             </view>
           </view>
         </view>
@@ -268,11 +268,97 @@
         </view>
       </view>
     </view>
+
+    <!-- 邮箱登录弹窗 -->
+    <view v-if="showEmailLogin" class="register-modal" @click.self="closeEmailLogin">
+      <view class="register-content" @click.stop>
+        <view class="register-header">
+          <text class="register-title">邮箱登录</text>
+          <view class="close-button" @click="closeEmailLogin">✕</view>
+        </view>
+        <view class="register-form">
+          <view class="email-login-tabs">
+            <view
+              class="email-login-tab"
+              :class="{ active: emailLoginMode === 'password' }"
+              @click="switchEmailLoginMode('password')"
+            >
+              密码登录
+            </view>
+            <view
+              class="email-login-tab"
+              :class="{ active: emailLoginMode === 'code' }"
+              @click="switchEmailLoginMode('code')"
+            >
+              验证码登录
+            </view>
+          </view>
+          <view class="form-group">
+            <view class="input-wrapper">
+              <view class="input-icon">📧</view>
+              <input
+                v-model="emailForm.email"
+                type="text"
+                placeholder="请输入邮箱地址"
+                class="form-input"
+                :disabled="emailLoading"
+              />
+            </view>
+          </view>
+          <view class="form-group" v-if="emailLoginMode === 'password'">
+            <view class="input-wrapper">
+              <view class="input-icon">🔒</view>
+              <input
+                v-model="emailForm.password"
+                type="password"
+                placeholder="请输入密码"
+                class="form-input"
+                :disabled="emailLoading"
+              />
+            </view>
+          </view>
+          <view class="form-group" v-else>
+            <view class="input-wrapper code-input-wrapper">
+              <view class="input-icon">🔐</view>
+              <input
+                v-model="emailCode"
+                type="number"
+                placeholder="请输入6位邮箱验证码"
+                class="form-input code-input"
+                maxlength="6"
+                :disabled="emailLoading"
+              />
+              <button
+                class="code-button"
+                :disabled="emailLoading || emailCountdown > 0"
+                @click="handleSendEmailCode"
+              >
+                {{ emailCountdown > 0 ? `${emailCountdown}秒后重试` : '获取验证码' }}
+              </button>
+            </view>
+            <view class="code-tip">
+              验证码将发送到上述邮箱，5分钟内有效。
+            </view>
+          </view>
+          <view v-if="emailErrorMessage" class="register-error-message">
+            <text class="error-icon">⚠️</text>
+            <text>{{ emailErrorMessage }}</text>
+          </view>
+          <button
+            class="primary-button"
+            :disabled="emailLoading || !canSubmitEmailLogin"
+            @click="handleEmailLogin"
+          >
+            {{ emailLoading ? '登录中...' : '登录' }}
+          </button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { request } from '@/utils/request.js'
 import { setToken, setUserInfo } from '@/utils/auth.js'
 import { startOneClickLogin } from '@/services/oneclick/oneClickLogin.js'
@@ -284,6 +370,7 @@ const currentTab = ref('account') // 'account' | 'phone'
 // 加载状态
 const loading = ref(false)
 const oneClickLoading = ref(false)
+const qqLoginLoading = ref(false)
 const errorMessage = ref('')
 const registerErrorMessage = ref('')
 
@@ -306,6 +393,19 @@ const registerForm = ref({
   password: ''
 })
 
+const emailForm = ref({
+  email: '',
+  password: ''
+})
+
+const showEmailLogin = ref(false)
+const emailErrorMessage = ref('')
+const emailLoading = ref(false)
+const emailLoginMode = ref('password') // password | code
+const emailCode = ref('')
+const emailCountdown = ref(0)
+let emailTimer = null
+
 // 显示注册弹窗
 const showRegister = ref(false)
 
@@ -322,6 +422,28 @@ const captchaConfig = ref({
   protocol: 'https://'
 })
 const captchaInstance = ref(null)
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+const canSubmitEmailLogin = computed(() => {
+  if (!emailForm.value.email) return false
+  if (emailLoginMode.value === 'password') {
+    return !!emailForm.value.password
+  }
+  return emailCode.value.trim().length === 6
+})
+
+const switchEmailLoginMode = (mode) => {
+  if (emailLoginMode.value === mode) return
+  emailLoginMode.value = mode
+  emailErrorMessage.value = ''
+
+  if (mode === 'password') {
+    emailCode.value = ''
+    clearEmailCountdown()
+  } else {
+    emailForm.value.password = ''
+  }
+}
 
 // 切换登录方式
 const switchTab = (tab) => {
@@ -537,19 +659,14 @@ const handleAccountLogin = async () => {
   }
 }
 
-const handleOneClickLogin = async () => {
-  // #ifdef H5
+// #ifdef APP-PLUS
+const runAppPlusOneClickLogin = async () => {
   oneClickLoading.value = true
   try {
     const result = await startOneClickLogin({
-      authPageOption: {
-        navText: '一键登录',
-        btnText: '立即登录',
-        isDialog: true,
-        manualClose: true,
-        agreeSymbol: '、',
-        privacyBefore: '我已阅读并同意',
-      },
+      onStatus: (info) => {
+        console.log('[oneclick][app]', info)
+      }
     })
 
     if (result?.success && result?.token) {
@@ -572,14 +689,19 @@ const handleOneClickLogin = async () => {
   } finally {
     oneClickLoading.value = false
   }
+}
+// #endif
+
+const handleOneClickLogin = async () => {
+  // #ifdef APP-PLUS
+  await runAppPlusOneClickLogin()
+  return
   // #endif
-  // #ifndef H5
   uni.showToast({
-    title: '一键登录仅支持H5环境',
+    title: '当前环境暂不支持一键登录',
     icon: 'none',
     duration: 2000
   })
-  // #endif
 }
 
 
@@ -1092,29 +1214,359 @@ const handleForgotPassword = () => {
   console.log('忘记密码')
 }
 
-// 第三方登录功能已移除，保留占位函数以避免旧代码引用报错
-const handleWechatLogin = () => {
+const wechatLoginLoading = ref(false)
+
+const handleWechatLogin = async () => {
+  if (wechatLoginLoading.value) return
+
+  // #ifdef APP-PLUS
+  wechatLoginLoading.value = true
+  uni.showLoading({ title: '微信登录中...' })
+  try {
+    // 检查微信是否已安装
+    const isInstalled = plus.runtime.isApplicationExist
+      ? plus.runtime.isApplicationExist({ pname: 'com.tencent.mm', action: 'weixin://' })
+      : true
+    if (!isInstalled) {
+      throw new Error('请先安装微信客户端')
+    }
+
+    console.log('🟢 开始调用uni.login，provider=weixin')
+    const authRes = await new Promise((resolve, reject) => {
+      uni.login({
+        provider: 'weixin',
+        success: resolve,
+        fail: reject
+      })
+    })
+
+    const authResult = authRes?.authResult || {}
+    const accessToken = authResult.access_token || authResult.accessToken
+    const openId = authResult.openid || authResult.openId || authResult.unionid
+
+    console.log('🟢 uni.login完成:', {
+      hasAccessToken: !!accessToken,
+      hasOpenId: !!openId
+    })
+
+    if (!openId) {
+      throw new Error('未获取到微信授权凭证，请重试')
+    }
+
+    let profile = {}
+    try {
+      const userInfoRes = await new Promise((resolve, reject) => {
+        uni.getUserInfo({
+          provider: 'weixin',
+          success: resolve,
+          fail: reject
+        })
+      })
+      profile = userInfoRes?.userInfo || {}
+      console.log('🟢 获取到微信用户信息', profile)
+    } catch (infoErr) {
+      console.warn('⚠️ 获取微信用户信息失败，将使用后端返回的资料', infoErr)
+    }
+
+    const backendRes = await request({
+      url: '/auth/login/callback',
+      method: 'POST',
+      needAuth: false,
+      showLoading: false,
+      data: {
+        type: 'weixin',
+        code: JSON.stringify({
+          accessToken,
+          openId,
+          profile: {
+            nickname: profile.nickName || profile.nickname,
+            avatar: profile.avatarUrl || profile.headimgurl
+          }
+        })
+      }
+    })
+
+    if (backendRes?.success && backendRes?.token) {
+      await handleLoginSuccess(backendRes)
+    } else {
+      throw new Error(backendRes?.message || '微信登录失败，请稍后重试')
+    }
+  } catch (error) {
+    console.error('❌ 微信登录失败:', error)
+    uni.showToast({
+      title: error?.message || '微信登录失败',
+      icon: 'none',
+      duration: 2500
+    })
+  } finally {
+    wechatLoginLoading.value = false
+    uni.hideLoading()
+  }
+  // #endif
+
+  // #ifndef APP-PLUS
   uni.showToast({
-    title: '已关闭第三方登录，请使用账号或验证码登录',
+    title: '微信登录仅支持App端使用',
     icon: 'none',
     duration: 2000
   })
+  // #endif
 }
 
-const handleAlipayLogin = () => {
-  uni.showToast({
-    title: '已关闭第三方登录，请使用账号或验证码登录',
-    icon: 'none',
-    duration: 2000
-  })
+const handleEmailLogin = async () => {
+  if (emailLoading.value) return
+
+  const trimmedEmail = emailForm.value.email?.trim().toLowerCase()
+  if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
+    uni.showToast({
+      title: '请输入有效的邮箱地址',
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+
+  let requestConfig
+  if (emailLoginMode.value === 'password') {
+    if (!emailForm.value.password) {
+      uni.showToast({
+        title: '请输入邮箱密码',
+        icon: 'none',
+        duration: 2000
+      })
+      return
+    }
+    requestConfig = {
+      url: '/auth/login',
+      method: 'POST',
+      data: {
+        email: trimmedEmail,
+        password: emailForm.value.password
+      }
+    }
+  } else {
+    const trimmedCode = emailCode.value.trim()
+    if (trimmedCode.length !== 6) {
+      uni.showToast({
+        title: '请输入6位验证码',
+        icon: 'none',
+        duration: 2000
+      })
+      return
+    }
+    requestConfig = {
+      url: '/auth/login-by-email-code',
+      method: 'POST',
+      data: {
+        email: trimmedEmail,
+        code: trimmedCode
+      }
+    }
+  }
+
+  emailLoading.value = true
+  emailErrorMessage.value = ''
+  try {
+    const res = await request({
+      ...requestConfig,
+      needAuth: false,
+      showLoading: true,
+      showError: false
+    })
+
+    if (res?.success && res?.token) {
+      await handleLoginSuccess(res)
+      closeEmailLogin()
+      uni.showToast({
+        title: '登录成功',
+        icon: 'success',
+        duration: 2000
+      })
+    } else {
+      const message = res?.message || '邮箱登录失败，请稍后重试'
+      emailErrorMessage.value = message
+      uni.showToast({
+        title: message,
+        icon: 'none',
+        duration: 2000
+      })
+    }
+  } catch (error) {
+    const message = error?.message || error?.msg || '邮箱登录失败，请稍后重试'
+    emailErrorMessage.value = message
+    uni.showToast({
+      title: message,
+      icon: 'none',
+      duration: 2000
+    })
+  } finally {
+    emailLoading.value = false
+  }
 }
 
-const handleQQLogin = () => {
+const closeEmailLogin = () => {
+  if (emailLoading.value) return
+  clearEmailCountdown()
+  emailErrorMessage.value = ''
+  emailForm.value = {
+    email: '',
+    password: ''
+  }
+  emailCode.value = ''
+  emailLoginMode.value = 'password'
+  showEmailLogin.value = false
+}
+
+const handleSendEmailCode = async () => {
+  if (emailCountdown.value > 0) return
+  const trimmedEmail = emailForm.value.email ? emailForm.value.email.trim() : ''
+  if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
+    uni.showToast({
+      title: '请先输入有效的邮箱地址',
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+
+  try {
+    await request({
+      url: '/auth/send-email-code',
+      method: 'POST',
+      data: {
+        email: trimmedEmail.toLowerCase()
+      },
+      needAuth: false,
+      showLoading: true,
+      showError: false
+    })
+    emailCode.value = ''
+    startEmailCountdown()
+    uni.showToast({
+      title: '验证码已发送，请查收邮箱',
+      icon: 'none',
+      duration: 2000
+    })
+  } catch (error) {
+    console.error('📮 发送邮箱验证码失败:', error)
+    const message =
+      error?.message ||
+      error?.data?.message ||
+      error?.msg ||
+      error?.error ||
+      '验证码发送失败'
+    uni.showToast({ title: message, icon: 'none', duration: 2000 })
+  }
+}
+
+const startEmailCountdown = () => {
+  clearEmailCountdown()
+  emailCountdown.value = 60
+  emailTimer = setInterval(() => {
+    emailCountdown.value -= 1
+    if (emailCountdown.value <= 0) {
+      clearEmailCountdown()
+    }
+  }, 1000)
+}
+
+const clearEmailCountdown = () => {
+  if (emailTimer) {
+    clearInterval(emailTimer)
+    emailTimer = null
+  }
+  emailCountdown.value = 0
+}
+
+onUnmounted(() => {
+  clearEmailCountdown()
+})
+
+const handleQQLogin = async () => {
+  if (qqLoginLoading.value) return
+
+  // #ifdef APP-PLUS
+  qqLoginLoading.value = true
+  uni.showLoading({ title: 'QQ登录中...' })
+  try {
+    console.log('🐧 开始调用uni.login，provider=qq')
+    const authRes = await new Promise((resolve, reject) => {
+      uni.login({
+        provider: 'qq',
+        success: resolve,
+        fail: reject
+      })
+    })
+
+    const authResult = authRes?.authResult || {}
+    const accessToken = authResult.access_token || authResult.accessToken
+    const openId = authResult.openid || authResult.openId
+
+    console.log(' uni.login完成:', {
+      hasAccessToken: !!accessToken,
+      hasOpenId: !!openId
+    })
+
+    if (!accessToken || !openId) {
+      throw new Error('未获取到QQ授权凭证，请重试')
+    }
+
+    let profile = {}
+    try {
+      const userInfoRes = await new Promise((resolve, reject) => {
+        uni.getUserInfo({
+          provider: 'qq',
+          success: resolve,
+          fail: reject
+        })
+      })
+      profile = userInfoRes?.userInfo || {}
+      console.log(' 获取到QQ用户信息', profile)
+    } catch (infoErr) {
+      console.warn(' 获取QQ用户信息失败，将使用后端返回的资料', infoErr)
+    }
+
+    // 使用已有的第三方登录回调接口，传递 type 和临时凭证
+    const backendRes = await request({
+      url: '/auth/login/callback',
+      method: 'POST',
+      needAuth: false,
+      showLoading: false,
+      data: {
+        type: 'qq',
+        code: JSON.stringify({ accessToken, openId, profile: {
+          nickname: profile.nickname || profile.nickName,
+          avatar: profile.figureurl_qq_2 || profile.avatarUrl || profile.avatarUrlHd
+        } })
+      }
+    })
+
+    if (backendRes?.success && backendRes?.token) {
+      await handleLoginSuccess(backendRes)
+    } else {
+      const errorMsg = backendRes?.message || 'QQ登录失败，请稍后重试'
+      throw new Error(errorMsg)
+    }
+  } catch (error) {
+    console.error('❌ QQ登录失败:', error)
+    uni.showToast({
+      title: error?.message || 'QQ登录失败',
+      icon: 'none',
+      duration: 2500
+    })
+  } finally {
+    qqLoginLoading.value = false
+    uni.hideLoading()
+  }
+  // #endif
+
+  // #ifndef APP-PLUS
   uni.showToast({
-    title: '已关闭第三方登录，请使用账号或验证码登录',
+    title: 'QQ登录仅支持App端使用',
     icon: 'none',
     duration: 2000
   })
+  // #endif
 }
 </script>
 
@@ -1126,7 +1578,7 @@ const handleQQLogin = () => {
   justify-content: center;
   align-items: center;
   padding: 40rpx;
-  background: linear-gradient(135deg, #667eea 0%, #4facfe 50%, #00f2fe 100%);
+  background: linear-gradient(160deg, #6366f1 0%, #818cf8 30%, #60a5fa 60%, #38bdf8 100%);
   overflow: hidden;
 }
 
@@ -1156,7 +1608,7 @@ const handleQQLogin = () => {
 .bg-circle {
   position: absolute;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   animation: float 20s infinite ease-in-out;
 }
 
@@ -1199,11 +1651,11 @@ const handleQQLogin = () => {
   z-index: 1;
   width: 100%;
   max-width: 680rpx;
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 32rpx;
-  padding: 60rpx 50rpx;
-  box-shadow: 0 20rpx 100rpx rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(10rpx);
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 36rpx;
+  padding: 60rpx 48rpx;
+  box-shadow: 0 24rpx 80rpx rgba(0, 0, 0, 0.12), 0 4rpx 20rpx rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(20rpx);
 }
 
 /* 头部 */
@@ -1216,12 +1668,12 @@ const handleQQLogin = () => {
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  width: 120rpx;
-  height: 120rpx;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 24rpx;
+  width: 128rpx;
+  height: 128rpx;
+  background: linear-gradient(145deg, #6366f1 0%, #8b5cf6 100%);
+  border-radius: 30rpx;
   margin-bottom: 30rpx;
-  box-shadow: 0 10rpx 30rpx rgba(102, 126, 234, 0.3);
+  box-shadow: 0 12rpx 36rpx rgba(99, 102, 241, 0.35);
 }
 
 .logo-icon {
@@ -1265,9 +1717,9 @@ const handleQQLogin = () => {
 
 .tab-item.active {
   background: #fff;
-  color: #667eea;
+  color: #6366f1;
   font-weight: 600;
-  box-shadow: 0 2rpx 8rpx rgba(102, 126, 234, 0.2);
+  box-shadow: 0 2rpx 10rpx rgba(99, 102, 241, 0.18);
 }
 
 /* 表单 */
@@ -1292,8 +1744,8 @@ const handleQQLogin = () => {
 
 .input-wrapper:focus-within {
   background: #fff;
-  border-color: #667eea;
-  box-shadow: 0 0 0 4rpx rgba(102, 126, 234, 0.1);
+  border-color: #6366f1;
+  box-shadow: 0 0 0 4rpx rgba(99, 102, 241, 0.1);
 }
 
 .input-icon {
@@ -1332,10 +1784,10 @@ const handleQQLogin = () => {
 .code-button {
   height: 72rpx;
   padding: 0 24rpx;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   color: #fff;
   border: none;
-  border-radius: 12rpx;
+  border-radius: 36rpx;
   font-size: 24rpx;
   font-weight: 500;
   white-space: nowrap;
@@ -1367,7 +1819,7 @@ const handleQQLogin = () => {
 }
 
 .forgot-password {
-  color: #667eea;
+  color: #6366f1;
   font-weight: 500;
 }
 
@@ -1375,15 +1827,16 @@ const handleQQLogin = () => {
 .primary-button {
   width: 100%;
   height: 96rpx;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
   color: #fff;
   border: none;
-  border-radius: 16rpx;
+  border-radius: 48rpx;
   font-size: 32rpx;
   font-weight: 600;
   margin-bottom: 30rpx;
-  box-shadow: 0 8rpx 24rpx rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8rpx 28rpx rgba(99, 102, 241, 0.35);
   transition: all 0.3s;
+  letter-spacing: 2rpx;
 }
 
 .primary-button:active {
@@ -1403,11 +1856,12 @@ const handleQQLogin = () => {
   height: 88rpx;
   margin-top: 20rpx;
   background: #ffffff;
-  border: 2rpx solid #667eea;
-  border-radius: 20rpx;
+  border: 2rpx solid #6366f1;
+  border-radius: 44rpx;
   font-size: 30rpx;
-  color: #667eea;
+  color: #6366f1;
   font-weight: 600;
+  letter-spacing: 2rpx;
 }
 
 .oneclick-button:disabled {
@@ -1424,7 +1878,7 @@ const handleQQLogin = () => {
 }
 
 .link-text {
-  color: #667eea;
+  color: #6366f1;
   font-weight: 500;
   margin-left: 8rpx;
 }
@@ -1437,70 +1891,112 @@ const handleQQLogin = () => {
 .divider {
   display: flex;
   align-items: center;
-  margin-bottom: 30rpx;
+  margin-bottom: 40rpx;
 }
 
 .divider-line {
   flex: 1;
   height: 1rpx;
-  background: #e5e5ea;
+  background: linear-gradient(90deg, transparent, #e0e0e5, transparent);
 }
 
 .divider-text {
-  margin: 0 20rpx;
+  margin: 0 24rpx;
   font-size: 24rpx;
-  color: #8e8e93;
+  color: #aeaeb2;
+  white-space: nowrap;
 }
 
 .third-party-buttons {
   display: flex;
-  justify-content: space-around;
+  justify-content: center;
+  gap: 60rpx;
 }
 
 .third-party-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  cursor: pointer;
-  transition: transform 0.3s;
+  justify-content: center;
+  transition: transform 0.2s ease, opacity 0.2s;
 }
 
 .third-party-item:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
+  opacity: 0.8;
+}
+
+.third-party-item.disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .third-party-icon {
-  width: 100rpx;
-  height: 100rpx;
+  width: 96rpx;
+  height: 96rpx;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 48rpx;
-  margin-bottom: 16rpx;
-  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+  font-size: 40rpx;
+  margin-bottom: 14rpx;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
+  transition: box-shadow 0.2s;
 }
 
 .third-party-icon.wechat {
-  background: linear-gradient(135deg, #07c160 0%, #06ad56 100%);
+  background: linear-gradient(145deg, #2dc100 0%, #07c160 50%, #06ad56 100%);
+  font-size: 36rpx;
 }
 
-.third-party-icon.alipay {
-  background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+.third-party-icon.email {
+  background: linear-gradient(145deg, #ff6b35 0%, #f97316 50%, #ea580c 100%);
+  font-size: 38rpx;
 }
 
 .third-party-icon.qq {
-  background: linear-gradient(135deg, #12b7f5 0%, #0ea5e9 100%);
-}
-
-.third-party-icon.douyin {
-  background: linear-gradient(135deg, #111 0%, #222 100%);
-  color: #fff;
+  background: linear-gradient(145deg, #4dc8f8 0%, #12b7f5 50%, #0ea5e9 100%);
+  font-size: 38rpx;
+  font-weight: 800;
+  font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .third-party-text {
+  font-size: 22rpx;
+  color: #8e8e93;
+  font-weight: 500;
+}
+
+.email-login-tabs {
+  display: flex;
+  background: #f5f5f7;
+  border-radius: 16rpx;
+  padding: 6rpx;
+  margin-bottom: 24rpx;
+}
+
+.email-login-tab {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 26rpx;
+  color: #8e8e93;
+  border-radius: 12rpx;
+}
+
+.email-login-tab.active {
+  background: #fff;
+  color: #667eea;
+  font-weight: 600;
+  box-shadow: 0 2rpx 8rpx rgba(102, 126, 234, 0.2);
+}
+
+.code-tip {
   font-size: 24rpx;
   color: #8e8e93;
+  margin-top: 12rpx;
 }
 
 /* 错误提示 */

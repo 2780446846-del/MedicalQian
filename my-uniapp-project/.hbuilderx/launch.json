@@ -3,8 +3,20 @@
     "configurations" : [
         {
             "customPlaygroundType" : "device",
+            "localRepoPath" : "D:/ZM/Qian/MedicalQian/my-uniapp-project",
+            "packageName" : "io.dcloud.HBuilder",
             "playground" : "standard",
             "type" : "uni-app:app-android"
+        },
+        {
+            "app" : {
+                "launchtype" : "local"
+            },
+            "default" : {
+                "launchtype" : "local"
+            },
+            "provider" : "aliyun",
+            "type" : "uniCloud"
         }
     ]
 }
