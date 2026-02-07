@@ -12,7 +12,7 @@
     <!-- 标签栏 -->
     <view class="tabs-container">
       <view 
-        v-for="(tab, index) in tabs" 
+        v-for="tab in tabs" 
         :key="tab.key"
         class="tab-item" 
         :class="{ active: activeTab === tab.key }"

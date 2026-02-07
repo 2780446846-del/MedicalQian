@@ -282,8 +282,17 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted, computed, watch } from 'vue'
-import { AMAP_JS_KEY } from '@/utils/amapConfig.js'
+import { AMAP_JS_KEY } from '../../utils/amapConfig'
+import { getUserLocationWithErrorHandling, openMapNavigationWithFallback } from '../../utils/location'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 interface Hospital {
   id: number
@@ -300,10 +309,10 @@ interface Hospital {
   businessArea: string
   rating: string
   cost: string
-  photos?: Array<{
+  photos?: {
     url: string
     title: string
-  }>
+  }[]
 }
 
 interface PatientComment {
@@ -784,7 +793,7 @@ const navigateToSmartConsult = () => {
 }
 
 // 导航到医院
-const navigateToHospital = async () => {
+const navigateToHospital = () => {
   if (!hospital.value) {
     uni.showToast({
       title: '医院信息加载中，请稍候',
@@ -797,108 +806,18 @@ const navigateToHospital = async () => {
   const hospitalLatitude = parseFloat(hospital.value.latitude) || 39.90923
   const hospitalLongitude = parseFloat(hospital.value.longitude) || 116.397428
   const hospitalName = hospital.value.name || '医院'
-  const hospitalAddress = hospital.value.address || ''
   
-  // 显示加载提示
-  uni.showLoading({
-    title: '正在获取位置...',
-    mask: true
-  })
-  
-  try {
-    // 获取用户当前位置
-    const locationRes = await new Promise<UniApp.GetLocationSuccess>((resolve, reject) => {
-      uni.getLocation({
-        type: 'gcj02', // 使用高德地图坐标系
-        success: resolve,
-        fail: reject
-      })
-    })
-    
-    const userLatitude = locationRes.latitude
-    const userLongitude = locationRes.longitude
-    
-    console.log('用户当前位置:', userLatitude, userLongitude)
-    console.log('医院位置:', hospitalLatitude, hospitalLongitude)
-    
-    uni.hideLoading()
-    
-    // #ifdef H5
-    // H5 环境下，使用高德地图 Web 导航
-    // 构建高德地图导航 URL，包含起点和终点
-    const amapNavUrl = `https://uri.amap.com/navigation?from=${userLongitude},${userLatitude}&to=${hospitalLongitude},${hospitalLatitude}&toName=${encodeURIComponent(hospitalName)}&mode=car&policy=1&src=myapp&callnative=0`
-    
-    // 尝试打开高德地图导航
-    window.open(amapNavUrl, '_blank')
-    
-    uni.showToast({
-      title: '已打开导航',
-      icon: 'success',
-      duration: 2000
-    })
-    // #endif
-    
-    // #ifndef H5
-    // 非 H5 环境（App、小程序），使用 uni.openLocation
-    uni.openLocation({
-      latitude: hospitalLatitude,
-      longitude: hospitalLongitude,
-      name: hospitalName,
-      address: hospitalAddress,
-      scale: 18, // 地图缩放级别，范围3-19
-      success: () => {
-        console.log('打开地图成功')
-      },
-      fail: (err) => {
-        console.error('打开地图失败:', err)
-        // 如果打开地图失败，尝试使用其他方式
-        uni.showModal({
-          title: '提示',
-          content: '无法打开地图应用，请手动在地图应用中搜索：' + hospitalName,
-          showCancel: false
-        })
-      }
-    })
-    // #endif
-    
-  } catch (error) {
-    uni.hideLoading()
-    console.error('获取位置失败:', error)
-    
-    // 如果获取位置失败，仍然可以导航，但不设置起点
-    uni.showModal({
-      title: '位置获取失败',
-      content: '无法获取您的位置，是否继续导航到' + hospitalName + '？',
-      confirmText: '继续导航',
-      cancelText: '取消',
-      success: (res) => {
-        if (res.confirm) {
-          // #ifdef H5
-          // 不设置起点，只设置终点
-          const amapNavUrl = `https://uri.amap.com/navigation?to=${hospitalLongitude},${hospitalLatitude}&toName=${encodeURIComponent(hospitalName)}&mode=car&policy=1&src=myapp&callnative=0`
-          window.open(amapNavUrl, '_blank')
-          // #endif
-          
-          // #ifndef H5
-          uni.openLocation({
-            latitude: hospitalLatitude,
-            longitude: hospitalLongitude,
-            name: hospitalName,
-            address: hospitalAddress,
-            scale: 18,
-            fail: () => {
-              uni.showToast({
-                title: '请手动在地图应用中搜索',
-                icon: 'none',
-                duration: 2000
-              })
-            }
-          })
-          // #endif
-        }
-      }
-    })
+  // 使用我们封装好的导航函数，支持地图选择
+  const destination = {
+    latitude: hospitalLatitude,
+    longitude: hospitalLongitude,
+    address: hospital.value.address || ''
   }
+  
+  // 调用导航函数，会自动显示地图选择菜单
+  openMapNavigationWithFallback(destination, {
+    destinationName: hospitalName
+  })
 }
 
 // 监听activeTab变化，当切换到交通指南时初始化地图

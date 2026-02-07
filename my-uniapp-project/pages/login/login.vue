@@ -99,21 +99,21 @@
             <view class="divider-line"></view>
           </view>
           <view class="third-party-buttons">
-            <view class="third-party-item">
-              <view class="third-party-icon wechat">💬</view>
+            <view class="third-party-item" @click="handleWechatLogin">
+              <view class="third-party-icon wechat">微</view>
               <text class="third-party-text">微信</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon alipay">💰</view>
-              <text class="third-party-text">支付宝</text>
+            <view class="third-party-item" @click="showEmailLogin = true">
+              <view class="third-party-icon email">✉</view>
+              <text class="third-party-text">邮箱</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon qq">🐧</view>
-              <text class="third-party-text">QQ</text>
-            </view>
-            <view class="third-party-item">
-              <view class="third-party-icon douyin">🎵</view>
-              <text class="third-party-text">抖音</text>
+            <view 
+              class="third-party-item"
+              :class="{ disabled: qqLoginLoading }"
+              @click="handleQQLogin"
+            >
+              <view class="third-party-icon qq">Q</view>
+              <text class="third-party-text">{{ qqLoginLoading ? '登录中' : 'QQ' }}</text>
             </view>
           </view>
         </view>
@@ -121,6 +121,19 @@
 
       <!-- 手机号验证码登录 -->
       <view v-if="currentTab === 'phone'" class="login-form">
+        <!-- #ifdef H5 -->
+        <view id="captcha" class="captcha-container"></view>
+        <!-- #endif -->
+        <!-- #ifdef APP-PLUS -->
+        <captcha
+          ref="captchaRef"
+          :config="captchaConfig"
+          @captchaSuccess="handleCaptchaSuccess"
+          @captchaError="handleCaptchaError"
+          @captchaFail="handleCaptchaFail"
+          @captchaClose="handleCaptchaClose"
+        />
+        <!-- #endif -->
         <view class="form-group">
           <view class="input-wrapper">
             <view class="input-icon">📱</view>
@@ -161,6 +174,13 @@
         >
           {{ loading ? '登录中...' : '登录' }}
         </button>
+        <button
+          class="oneclick-button"
+          :disabled="oneClickLoading"
+          @click="handleOneClickLogin"
+        >
+          {{ oneClickLoading ? '一键登录中...' : '一键登录' }}
+        </button>
         <view class="register-link">
           还没有账号？
           <text class="link-text" @click="showRegister = true">立即注册</text>
@@ -174,21 +194,21 @@
             <view class="divider-line"></view>
           </view>
           <view class="third-party-buttons">
-            <view class="third-party-item">
-              <view class="third-party-icon wechat">💬</view>
+            <view class="third-party-item" @click="handleWechatLogin">
+              <view class="third-party-icon wechat">微</view>
               <text class="third-party-text">微信</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon alipay">💰</view>
-              <text class="third-party-text">支付宝</text>
+            <view class="third-party-item" @click="showEmailLogin = true">
+              <view class="third-party-icon email">✉</view>
+              <text class="third-party-text">邮箱</text>
             </view>
-            <view class="third-party-item">
-              <view class="third-party-icon qq">🐧</view>
-              <text class="third-party-text">QQ</text>
-            </view>
-            <view class="third-party-item">
-              <view class="third-party-icon douyin">🎵</view>
-              <text class="third-party-text">抖音</text>
+            <view 
+              class="third-party-item"
+              :class="{ disabled: qqLoginLoading }"
+              @click="handleQQLogin"
+            >
+              <view class="third-party-icon qq">Q</view>
+              <text class="third-party-text">{{ qqLoginLoading ? '登录中' : 'QQ' }}</text>
             </view>
           </view>
         </view>
@@ -248,20 +268,109 @@
         </view>
       </view>
     </view>
+
+    <!-- 邮箱登录弹窗 -->
+    <view v-if="showEmailLogin" class="register-modal" @click.self="closeEmailLogin">
+      <view class="register-content" @click.stop>
+        <view class="register-header">
+          <text class="register-title">邮箱登录</text>
+          <view class="close-button" @click="closeEmailLogin">✕</view>
+        </view>
+        <view class="register-form">
+          <view class="email-login-tabs">
+            <view
+              class="email-login-tab"
+              :class="{ active: emailLoginMode === 'password' }"
+              @click="switchEmailLoginMode('password')"
+            >
+              密码登录
+            </view>
+            <view
+              class="email-login-tab"
+              :class="{ active: emailLoginMode === 'code' }"
+              @click="switchEmailLoginMode('code')"
+            >
+              验证码登录
+            </view>
+          </view>
+          <view class="form-group">
+            <view class="input-wrapper">
+              <view class="input-icon">📧</view>
+              <input
+                v-model="emailForm.email"
+                type="text"
+                placeholder="请输入邮箱地址"
+                class="form-input"
+                :disabled="emailLoading"
+              />
+            </view>
+          </view>
+          <view class="form-group" v-if="emailLoginMode === 'password'">
+            <view class="input-wrapper">
+              <view class="input-icon">🔒</view>
+              <input
+                v-model="emailForm.password"
+                type="password"
+                placeholder="请输入密码"
+                class="form-input"
+                :disabled="emailLoading"
+              />
+            </view>
+          </view>
+          <view class="form-group" v-else>
+            <view class="input-wrapper code-input-wrapper">
+              <view class="input-icon">🔐</view>
+              <input
+                v-model="emailCode"
+                type="number"
+                placeholder="请输入6位邮箱验证码"
+                class="form-input code-input"
+                maxlength="6"
+                :disabled="emailLoading"
+              />
+              <button
+                class="code-button"
+                :disabled="emailLoading || emailCountdown > 0"
+                @click="handleSendEmailCode"
+              >
+                {{ emailCountdown > 0 ? `${emailCountdown}秒后重试` : '获取验证码' }}
+              </button>
+            </view>
+            <view class="code-tip">
+              验证码将发送到上述邮箱，5分钟内有效。
+            </view>
+          </view>
+          <view v-if="emailErrorMessage" class="register-error-message">
+            <text class="error-icon">⚠️</text>
+            <text>{{ emailErrorMessage }}</text>
+          </view>
+          <button
+            class="primary-button"
+            :disabled="emailLoading || !canSubmitEmailLogin"
+            @click="handleEmailLogin"
+          >
+            {{ emailLoading ? '登录中...' : '登录' }}
+          </button>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { request } from '@/utils/request.js'
 import { setToken, setUserInfo } from '@/utils/auth.js'
-import { API_BASE_URL } from '@/utils/config.js'
+import { startOneClickLogin } from '@/services/oneclick/oneClickLogin.js'
+import captcha from '@/components/captcha4/index.vue'
 
 // 当前登录方式
 const currentTab = ref('account') // 'account' | 'phone'
 
 // 加载状态
 const loading = ref(false)
+const oneClickLoading = ref(false)
+const qqLoginLoading = ref(false)
 const errorMessage = ref('')
 const registerErrorMessage = ref('')
 
@@ -274,7 +383,8 @@ const accountForm = ref({
 // 手机号登录表单
 const phoneForm = ref({
   phone: '',
-  code: ''
+  code: '',
+  outId: ''
 })
 
 // 注册表单
@@ -283,6 +393,19 @@ const registerForm = ref({
   password: ''
 })
 
+const emailForm = ref({
+  email: '',
+  password: ''
+})
+
+const showEmailLogin = ref(false)
+const emailErrorMessage = ref('')
+const emailLoading = ref(false)
+const emailLoginMode = ref('password') // password | code
+const emailCode = ref('')
+const emailCountdown = ref(0)
+let emailTimer = null
+
 // 显示注册弹窗
 const showRegister = ref(false)
 
@@ -290,6 +413,37 @@ const showRegister = ref(false)
 const showPassword = ref(false)
 const rememberMe = ref(false)
 const countdown = ref(0)
+const CAPTCHA_ID = '409ff4b182c43e02ca3c5fb3ea85a4f2'
+const captchaRef = ref(null)
+let pendingCaptchaShow = false
+const captchaConfig = ref({
+  captchaId: CAPTCHA_ID,
+  product: 'bind',
+  protocol: 'https://'
+})
+const captchaInstance = ref(null)
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+const canSubmitEmailLogin = computed(() => {
+  if (!emailForm.value.email) return false
+  if (emailLoginMode.value === 'password') {
+    return !!emailForm.value.password
+  }
+  return emailCode.value.trim().length === 6
+})
+
+const switchEmailLoginMode = (mode) => {
+  if (emailLoginMode.value === mode) return
+  emailLoginMode.value = mode
+  emailErrorMessage.value = ''
+
+  if (mode === 'password') {
+    emailCode.value = ''
+    clearEmailCountdown()
+  } else {
+    emailForm.value.password = ''
+  }
+}
 
 // 切换登录方式
 const switchTab = (tab) => {
@@ -506,6 +660,161 @@ const handleAccountLogin = async () => {
   }
 }
 
+// #ifdef APP-PLUS
+const runAppPlusOneClickLogin = async () => {
+  oneClickLoading.value = true
+  try {
+    const result = await startOneClickLogin({
+      onStatus: (info) => {
+        console.log('[oneclick][app]', info)
+      }
+    })
+
+    if (result?.success && result?.token) {
+      await handleLoginSuccess(result)
+    } else {
+      const message = result?.message || '一键登录失败，请稍后重试'
+      uni.showToast({
+        title: message,
+        icon: 'none',
+        duration: 2000
+      })
+    }
+  } catch (error) {
+    const message = error?.message || '一键登录失败，请稍后重试'
+    uni.showToast({
+      title: message,
+      icon: 'none',
+      duration: 2000
+    })
+  } finally {
+    oneClickLoading.value = false
+  }
+}
+// #endif
+
+const handleOneClickLogin = async () => {
+  // #ifdef APP-PLUS
+  await runAppPlusOneClickLogin()
+  return
+  // #endif
+  uni.showToast({
+    title: '当前环境暂不支持一键登录',
+    icon: 'none',
+    duration: 2000
+  })
+}
+
+
+
+const handleLoginSuccess = async (res) => {
+  // 保存token（使用统一的auth工具函数）
+  setToken(res.token)
+
+  // 保存用户信息（如果有，使用统一的auth工具函数）
+  if (res.data) {
+    // 使用统一的setUserInfo函数保存，确保使用正确的key
+    setUserInfo(res.data)
+    // 同时保留旧key以兼容旧代码
+    uni.setStorageSync('userInfo', res.data)
+
+    // 以用户ID（或用户名）作为 key，实现"每个用户一份资料"
+    const userId = res.data.id || res.data._id || res.data.userId || res.data.username || res.data.phone
+    try {
+      // 读取现有的所有用户资料映射
+      const allProfiles = uni.getStorageSync('userProfilesById') || {}
+
+      // 优先使用后端返回的数据库数据，其次使用本地缓存，最后用默认值
+      let profile = allProfiles[userId] || {
+        avatarUrl: 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar',
+        nickname: res.data.username || res.data.phone || '用户昵称',
+        gender: '保密',
+        phone: res.data.phone || '',
+        authStatus: '未认证',
+        realname: '',
+        idCard: ''
+      }
+
+      // 用后端返回的数据库数据更新本地资料（数据库数据优先）
+      if (res.data.avatarUrl !== undefined && res.data.avatarUrl !== null) {
+        profile.avatarUrl = res.data.avatarUrl || profile.avatarUrl || 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar'
+      }
+      if (res.data.nickname !== undefined && res.data.nickname !== null) {
+        profile.nickname = res.data.nickname || profile.nickname || res.data.username || res.data.phone || '用户昵称'
+      }
+      if (res.data.gender !== undefined && res.data.gender !== null) {
+        profile.gender = res.data.gender || profile.gender || '保密'
+      }
+      if (res.data.phone !== undefined && res.data.phone !== null) {
+        profile.phone = res.data.phone || profile.phone || ''
+      }
+      if (res.data.authStatus !== undefined && res.data.authStatus !== null) {
+        profile.authStatus = res.data.authStatus || profile.authStatus || '未认证'
+      }
+      if (res.data.realname !== undefined && res.data.realname !== null) {
+        profile.realname = res.data.realname || profile.realname || ''
+      }
+      if (res.data.idCard !== undefined && res.data.idCard !== null) {
+        profile.idCard = res.data.idCard || profile.idCard || ''
+      }
+
+      // 确保昵称至少是当前用户名或手机号
+      if (!profile.nickname) {
+        profile.nickname = res.data.username || res.data.phone || '用户昵称'
+      }
+
+      // 写回映射与当前用户标记
+      allProfiles[userId] = profile
+      uni.setStorageSync('userProfilesById', allProfiles)
+      uni.setStorageSync('currentUserId', userId)
+
+      // 同步到全局数据，便于各页面使用
+      const app = getApp && getApp()
+      if (app && app.globalData) {
+        app.globalData.userInfo = res.data
+        app.globalData.userProfile = profile
+      }
+
+      // 兼容旧逻辑：同时保留一份当前用户的 userProfile
+      uni.setStorageSync('userProfile', profile)
+
+      console.log('✅ 手机号登录成功，已同步用户资料:', {
+        userId,
+        avatarUrl: profile.avatarUrl ? '已设置' : '未设置',
+        nickname: profile.nickname,
+        gender: profile.gender,
+        phone: profile.phone || '未设置'
+      })
+    } catch (e) {
+      console.warn('同步手机号登录用户信息到全局失败:', e)
+    }
+  }
+  
+  uni.showToast({
+    title: '登录成功！',
+    icon: 'success',
+    duration: 1500
+  })
+  
+  // 延迟跳转，让用户看到成功提示
+  setTimeout(() => {
+    // 跳转到首页（tabBar页面需要使用switchTab）
+    uni.switchTab({
+      url: '/pages/index/index',
+      success: () => {
+        console.log('跳转到首页成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        // 如果switchTab失败，尝试使用reLaunch
+        uni.reLaunch({
+          url: '/pages/index/index'
+        })
+      }
+    })
+  }, 500)
+}
+
 // 手机号登录
 const handlePhoneLogin = async () => {
   // 清空错误信息
@@ -549,121 +858,18 @@ const handlePhoneLogin = async () => {
   
   try {
     const res = await request({
-      url: '/auth/login-by-code',
+      url: '/login/verify',
       method: 'POST',
       data: {
         phone: phoneForm.value.phone,
-        code: phoneForm.value.code
+        code: phoneForm.value.code,
+        outId: phoneForm.value.outId
       },
       needAuth: false
     })
     
     if (res.success && res.token) {
-      // 保存token（使用统一的auth工具函数）
-      setToken(res.token)
-      
-      // 保存用户信息（如果有，使用统一的auth工具函数）
-      if (res.data) {
-        // 使用统一的setUserInfo函数保存，确保使用正确的key
-        setUserInfo(res.data)
-        // 同时保留旧key以兼容旧代码
-        uni.setStorageSync('userInfo', res.data)
-
-        // 以用户ID（或用户名）作为 key，实现"每个用户一份资料"
-        const userId = res.data.id || res.data._id || res.data.userId || res.data.username || res.data.phone
-        try {
-          // 读取现有的所有用户资料映射
-          const allProfiles = uni.getStorageSync('userProfilesById') || {}
-
-          // 优先使用后端返回的数据库数据，其次使用本地缓存，最后用默认值
-          let profile = allProfiles[userId] || {
-            avatarUrl: 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar',
-            nickname: res.data.username || res.data.phone || '用户昵称',
-            gender: '保密',
-            phone: res.data.phone || '',
-            authStatus: '未认证',
-            realname: '',
-            idCard: ''
-          }
-
-          // 用后端返回的数据库数据更新本地资料（数据库数据优先）
-          if (res.data.avatarUrl !== undefined && res.data.avatarUrl !== null) {
-            profile.avatarUrl = res.data.avatarUrl || profile.avatarUrl || 'https://dummyimage.com/200x200/4a90e2/ffffff&text=Avatar'
-          }
-          if (res.data.nickname !== undefined && res.data.nickname !== null) {
-            profile.nickname = res.data.nickname || profile.nickname || res.data.username || res.data.phone || '用户昵称'
-          }
-          if (res.data.gender !== undefined && res.data.gender !== null) {
-            profile.gender = res.data.gender || profile.gender || '保密'
-          }
-          if (res.data.phone !== undefined && res.data.phone !== null) {
-            profile.phone = res.data.phone || profile.phone || ''
-          }
-          if (res.data.authStatus !== undefined && res.data.authStatus !== null) {
-            profile.authStatus = res.data.authStatus || profile.authStatus || '未认证'
-          }
-          if (res.data.realname !== undefined && res.data.realname !== null) {
-            profile.realname = res.data.realname || profile.realname || ''
-          }
-          if (res.data.idCard !== undefined && res.data.idCard !== null) {
-            profile.idCard = res.data.idCard || profile.idCard || ''
-          }
-
-          // 确保昵称至少是当前用户名或手机号
-          if (!profile.nickname) {
-            profile.nickname = res.data.username || res.data.phone || '用户昵称'
-          }
-
-          // 写回映射与当前用户标记
-          allProfiles[userId] = profile
-          uni.setStorageSync('userProfilesById', allProfiles)
-          uni.setStorageSync('currentUserId', userId)
-
-          // 同步到全局数据，便于各页面使用
-          const app = getApp && getApp()
-          if (app && app.globalData) {
-            app.globalData.userInfo = res.data
-            app.globalData.userProfile = profile
-          }
-
-          // 兼容旧逻辑：同时保留一份当前用户的 userProfile
-          uni.setStorageSync('userProfile', profile)
-
-          console.log('✅ 手机号登录成功，已同步用户资料:', {
-            userId,
-            avatarUrl: profile.avatarUrl ? '已设置' : '未设置',
-            nickname: profile.nickname,
-            gender: profile.gender,
-            phone: profile.phone || '未设置'
-          })
-        } catch (e) {
-          console.warn('同步手机号登录用户信息到全局失败:', e)
-        }
-      }
-      
-      uni.showToast({
-        title: '登录成功！',
-        icon: 'success',
-        duration: 1500
-      })
-      
-      // 延迟跳转，让用户看到成功提示
-      setTimeout(() => {
-        // 跳转到首页（tabBar页面需要使用switchTab）
-        uni.switchTab({
-          url: '/pages/index/index',
-          success: () => {
-            console.log('跳转到首页成功')
-          },
-          fail: (err) => {
-            console.error('跳转失败:', err)
-            // 如果switchTab失败，尝试使用reLaunch
-            uni.reLaunch({
-              url: '/pages/index/index'
-            })
-          }
-        })
-      }, 500)
+      await handleLoginSuccess(res)
     } else {
       errorMessage.value = res.message || '登录失败，请重试'
       uni.showToast({
@@ -707,67 +913,108 @@ const handleSendCode = async () => {
     })
     return
   }
-  
   // 防止重复点击
   if (countdown.value > 0) {
     return
   }
-  
-  loading.value = true
-  
-  try {
-    console.log('📤 开始发送验证码，手机号:', phoneForm.value.phone)
-    
-    const res = await request({
-      url: '/auth/send-code',
-      method: 'POST',
-      data: {
-        phone: phoneForm.value.phone,
-        type: 'login'
-      },
-      needAuth: false,
-      showError: false // 手动处理错误提示
-    })
-    
-    console.log('📥 收到响应:', res)
-    
-    if (res && res.success) {
-      uni.showToast({
-        title: res.message || '验证码已发送',
-        icon: 'success',
-        duration: 2000
-      })
-      
-      // 开始倒计时
-      countdown.value = 60
-      const timer = setInterval(() => {
-        countdown.value--
-        if (countdown.value <= 0) {
-          clearInterval(timer)
-        }
-      }, 1000)
-      
-      // 开发环境显示验证码（方便测试）
-      if (res.code) {
-        console.log('✅ 验证码（仅开发环境）:', res.code)
-        setTimeout(() => {
-          uni.showModal({
-            title: '验证码（开发环境）',
-            content: `验证码：${res.code}`,
-            showCancel: false
-          })
-        }, 500)
+
+  // 触发图形验证码
+  // #ifdef APP-PLUS
+  if (captchaRef.value) {
+    captchaRef.value.showCaptcha()
+  }
+  // #endif
+
+  // #ifdef H5
+  pendingCaptchaShow = true
+  await ensureH5Captcha()
+  if (captchaInstance.value && captchaInstance.value.showCaptcha) {
+    captchaInstance.value.showCaptcha()
+    pendingCaptchaShow = false
+  }
+  // #endif
+}
+
+const ensureH5Captcha = () => {
+  return new Promise((resolve, reject) => {
+    if (captchaInstance.value) {
+      if (captchaInstance.value.appendTo) {
+        captchaInstance.value.appendTo('#captcha')
       }
-    } else {
-      const errorMsg = res?.message || res?.error || '发送失败，请重试'
-      console.error('❌ 发送失败:', errorMsg)
-      uni.showToast({
-        title: errorMsg,
-        icon: 'none',
-        duration: 3000
+      return resolve(captchaInstance.value)
+    }
+    if (typeof window === 'undefined') {
+      return reject(new Error('H5 环境不可用'))
+    }
+    const initCaptcha = () => {
+      if (!window.initAlicom4) {
+        return reject(new Error('验证码脚本加载失败'))
+      }
+      window.initAlicom4({
+        captchaId: CAPTCHA_ID,
+        product: 'bind',
+        protocol: 'https://'
+      }, (captchaObj) => {
+        captchaInstance.value = captchaObj
+        captchaObj.appendTo('#captcha')
+        if (captchaObj.onNextReady) {
+          captchaObj.onNextReady(() => {
+            if (pendingCaptchaShow && captchaObj.showCaptcha) {
+              captchaObj.showCaptcha()
+              pendingCaptchaShow = false
+            }
+          })
+        } else if (captchaObj.onReady) {
+          captchaObj.onReady(() => {
+            if (pendingCaptchaShow && captchaObj.showCaptcha) {
+              captchaObj.showCaptcha()
+              pendingCaptchaShow = false
+            }
+          })
+        }
+        captchaObj.onSuccess(() => {
+          const result = captchaObj.getValidate()
+          handleCaptchaSuccess(result)
+        })
+        resolve(captchaObj)
       })
     }
+    if (window.initAlicom4) {
+      initCaptcha()
+      return
+    }
+    const script = document.createElement('script')
+    script.src = '/static/ct4.js'
+    script.onload = initCaptcha
+    script.onerror = () => reject(new Error('验证码脚本加载失败'))
+    document.body.appendChild(script)
+  })
+}
+
+const handleCaptchaSuccess = async (result) => {
+  if (!result) {
+    uni.showToast({
+      title: '请完成图形验证',
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+
+  loading.value = true
+  try {
+    const captchaToken = await verifyCaptcha(result)
+    await sendSmsAfterCaptcha(captchaToken)
+    if (captchaInstance.value) {
+      if (captchaInstance.value.reset) {
+        captchaInstance.value.reset()
+      }
+      if (captchaInstance.value.hide) {
+        captchaInstance.value.hide()
+      }
+    }
   } catch (error) {
+<<<<<<< HEAD
     console.error('❌ 发送验证码异常:', error)
     console.error('错误详情:', JSON.stringify(error))
     
@@ -790,21 +1037,115 @@ const handleSendCode = async () => {
       errorMsg = error.response.data?.message || error.response.data?.error || '服务器错误'
     }
     
+=======
+    const message = error?.message || error?.msg || error?.errMsg || '图形验证码验证失败'
+>>>>>>> origin/main
     uni.showToast({
-      title: errorMsg,
+      title: message,
       icon: 'none',
-      duration: 3000
+      duration: 2000
     })
   } finally {
     loading.value = false
   }
 }
 
-// 注册
+const handleCaptchaError = () => {
+  uni.showToast({
+    title: '图形验证码加载失败',
+    icon: 'none',
+    duration: 2000
+  })
+}
+
+const handleCaptchaFail = () => {
+  uni.showToast({
+    title: '图形验证码校验失败，请重试',
+    icon: 'none',
+    duration: 2000
+  })
+}
+
+const handleCaptchaClose = () => {}
+
+const verifyCaptcha = async (result) => {
+  const res = await request({
+    url: '/login/captcha/verify',
+    method: 'POST',
+    data: {
+      phone: phoneForm.value.phone,
+      captchaId: result.captcha_id || CAPTCHA_ID,
+      lotNumber: result.lot_number,
+      captchaOutput: result.captcha_output,
+      passToken: result.pass_token,
+      genTime: result.gen_time
+    },
+    needAuth: false,
+    showError: false
+  })
+
+  if (!res || !res.captchaToken) {
+    throw new Error(res?.message || '图形验证码校验失败')
+  }
+  return res.captchaToken
+}
+
+const sendSmsAfterCaptcha = async (captchaToken) => {
+  console.log('📤 开始发送验证码，手机号:', phoneForm.value.phone)
+  const res = await request({
+    url: '/login/send',
+    method: 'POST',
+    data: {
+      phone: phoneForm.value.phone,
+      type: 'login',
+      captchaToken: captchaToken
+    },
+    needAuth: false,
+    showError: false
+  })
+
+  console.log('📥 收到响应:', res)
+
+  if (res && res.success) {
+    if (res.outId) {
+      phoneForm.value.outId = res.outId
+    }
+    uni.showToast({
+      title: res.message || '验证码已发送',
+      icon: 'success',
+      duration: 2000
+    })
+
+    countdown.value = 60
+    const timer = setInterval(() => {
+      countdown.value--
+      if (countdown.value <= 0) {
+        clearInterval(timer)
+      }
+    }, 1000)
+
+    if (res.code) {
+      console.log('✅ 验证码（仅开发环境）:', res.code)
+      setTimeout(() => {
+        uni.showModal({
+          title: '验证码（开发环境）',
+          content: `验证码：${res.code}`,
+          showCancel: false
+        })
+      }, 500)
+    }
+  } else {
+    const errorMsg = res?.message || res?.error || '发送失败，请重试'
+    console.error('❌ 发送失败:', errorMsg)
+    uni.showToast({
+      title: errorMsg,
+      icon: 'none',
+      duration: 3000
+    })
+  }
+}
+
 const handleRegister = async () => {
-  // 清空之前的错误信息
-  registerErrorMessage.value = ''
-  
   // 验证输入
   if (!registerForm.value.username || !registerForm.value.password) {
     registerErrorMessage.value = '请输入用户名和密码'
@@ -899,29 +1240,359 @@ const handleForgotPassword = () => {
   console.log('忘记密码')
 }
 
-// 第三方登录功能已移除，保留占位函数以避免旧代码引用报错
-const handleWechatLogin = () => {
+const wechatLoginLoading = ref(false)
+
+const handleWechatLogin = async () => {
+  if (wechatLoginLoading.value) return
+
+  // #ifdef APP-PLUS
+  wechatLoginLoading.value = true
+  uni.showLoading({ title: '微信登录中...' })
+  try {
+    // 检查微信是否已安装
+    const isInstalled = plus.runtime.isApplicationExist
+      ? plus.runtime.isApplicationExist({ pname: 'com.tencent.mm', action: 'weixin://' })
+      : true
+    if (!isInstalled) {
+      throw new Error('请先安装微信客户端')
+    }
+
+    console.log('🟢 开始调用uni.login，provider=weixin')
+    const authRes = await new Promise((resolve, reject) => {
+      uni.login({
+        provider: 'weixin',
+        success: resolve,
+        fail: reject
+      })
+    })
+
+    const authResult = authRes?.authResult || {}
+    const accessToken = authResult.access_token || authResult.accessToken
+    const openId = authResult.openid || authResult.openId || authResult.unionid
+
+    console.log('🟢 uni.login完成:', {
+      hasAccessToken: !!accessToken,
+      hasOpenId: !!openId
+    })
+
+    if (!openId) {
+      throw new Error('未获取到微信授权凭证，请重试')
+    }
+
+    let profile = {}
+    try {
+      const userInfoRes = await new Promise((resolve, reject) => {
+        uni.getUserInfo({
+          provider: 'weixin',
+          success: resolve,
+          fail: reject
+        })
+      })
+      profile = userInfoRes?.userInfo || {}
+      console.log('🟢 获取到微信用户信息', profile)
+    } catch (infoErr) {
+      console.warn('⚠️ 获取微信用户信息失败，将使用后端返回的资料', infoErr)
+    }
+
+    const backendRes = await request({
+      url: '/auth/login/callback',
+      method: 'POST',
+      needAuth: false,
+      showLoading: false,
+      data: {
+        type: 'weixin',
+        code: JSON.stringify({
+          accessToken,
+          openId,
+          profile: {
+            nickname: profile.nickName || profile.nickname,
+            avatar: profile.avatarUrl || profile.headimgurl
+          }
+        })
+      }
+    })
+
+    if (backendRes?.success && backendRes?.token) {
+      await handleLoginSuccess(backendRes)
+    } else {
+      throw new Error(backendRes?.message || '微信登录失败，请稍后重试')
+    }
+  } catch (error) {
+    console.error('❌ 微信登录失败:', error)
+    uni.showToast({
+      title: error?.message || '微信登录失败',
+      icon: 'none',
+      duration: 2500
+    })
+  } finally {
+    wechatLoginLoading.value = false
+    uni.hideLoading()
+  }
+  // #endif
+
+  // #ifndef APP-PLUS
   uni.showToast({
-    title: '已关闭第三方登录，请使用账号或验证码登录',
+    title: '微信登录仅支持App端使用',
     icon: 'none',
     duration: 2000
   })
+  // #endif
 }
 
-const handleAlipayLogin = () => {
-  uni.showToast({
-    title: '已关闭第三方登录，请使用账号或验证码登录',
-    icon: 'none',
-    duration: 2000
-  })
+const handleEmailLogin = async () => {
+  if (emailLoading.value) return
+
+  const trimmedEmail = emailForm.value.email?.trim().toLowerCase()
+  if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
+    uni.showToast({
+      title: '请输入有效的邮箱地址',
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+
+  let requestConfig
+  if (emailLoginMode.value === 'password') {
+    if (!emailForm.value.password) {
+      uni.showToast({
+        title: '请输入邮箱密码',
+        icon: 'none',
+        duration: 2000
+      })
+      return
+    }
+    requestConfig = {
+      url: '/auth/login',
+      method: 'POST',
+      data: {
+        email: trimmedEmail,
+        password: emailForm.value.password
+      }
+    }
+  } else {
+    const trimmedCode = emailCode.value.trim()
+    if (trimmedCode.length !== 6) {
+      uni.showToast({
+        title: '请输入6位验证码',
+        icon: 'none',
+        duration: 2000
+      })
+      return
+    }
+    requestConfig = {
+      url: '/auth/login-by-email-code',
+      method: 'POST',
+      data: {
+        email: trimmedEmail,
+        code: trimmedCode
+      }
+    }
+  }
+
+  emailLoading.value = true
+  emailErrorMessage.value = ''
+  try {
+    const res = await request({
+      ...requestConfig,
+      needAuth: false,
+      showLoading: true,
+      showError: false
+    })
+
+    if (res?.success && res?.token) {
+      await handleLoginSuccess(res)
+      closeEmailLogin()
+      uni.showToast({
+        title: '登录成功',
+        icon: 'success',
+        duration: 2000
+      })
+    } else {
+      const message = res?.message || '邮箱登录失败，请稍后重试'
+      emailErrorMessage.value = message
+      uni.showToast({
+        title: message,
+        icon: 'none',
+        duration: 2000
+      })
+    }
+  } catch (error) {
+    const message = error?.message || error?.msg || '邮箱登录失败，请稍后重试'
+    emailErrorMessage.value = message
+    uni.showToast({
+      title: message,
+      icon: 'none',
+      duration: 2000
+    })
+  } finally {
+    emailLoading.value = false
+  }
 }
 
-const handleQQLogin = () => {
+const closeEmailLogin = () => {
+  if (emailLoading.value) return
+  clearEmailCountdown()
+  emailErrorMessage.value = ''
+  emailForm.value = {
+    email: '',
+    password: ''
+  }
+  emailCode.value = ''
+  emailLoginMode.value = 'password'
+  showEmailLogin.value = false
+}
+
+const handleSendEmailCode = async () => {
+  if (emailCountdown.value > 0) return
+  const trimmedEmail = emailForm.value.email ? emailForm.value.email.trim() : ''
+  if (!trimmedEmail || !emailRegex.test(trimmedEmail)) {
+    uni.showToast({
+      title: '请先输入有效的邮箱地址',
+      icon: 'none',
+      duration: 2000
+    })
+    return
+  }
+
+  try {
+    await request({
+      url: '/auth/send-email-code',
+      method: 'POST',
+      data: {
+        email: trimmedEmail.toLowerCase()
+      },
+      needAuth: false,
+      showLoading: true,
+      showError: false
+    })
+    emailCode.value = ''
+    startEmailCountdown()
+    uni.showToast({
+      title: '验证码已发送，请查收邮箱',
+      icon: 'none',
+      duration: 2000
+    })
+  } catch (error) {
+    console.error('📮 发送邮箱验证码失败:', error)
+    const message =
+      error?.message ||
+      error?.data?.message ||
+      error?.msg ||
+      error?.error ||
+      '验证码发送失败'
+    uni.showToast({ title: message, icon: 'none', duration: 2000 })
+  }
+}
+
+const startEmailCountdown = () => {
+  clearEmailCountdown()
+  emailCountdown.value = 60
+  emailTimer = setInterval(() => {
+    emailCountdown.value -= 1
+    if (emailCountdown.value <= 0) {
+      clearEmailCountdown()
+    }
+  }, 1000)
+}
+
+const clearEmailCountdown = () => {
+  if (emailTimer) {
+    clearInterval(emailTimer)
+    emailTimer = null
+  }
+  emailCountdown.value = 0
+}
+
+onUnmounted(() => {
+  clearEmailCountdown()
+})
+
+const handleQQLogin = async () => {
+  if (qqLoginLoading.value) return
+
+  // #ifdef APP-PLUS
+  qqLoginLoading.value = true
+  uni.showLoading({ title: 'QQ登录中...' })
+  try {
+    console.log('🐧 开始调用uni.login，provider=qq')
+    const authRes = await new Promise((resolve, reject) => {
+      uni.login({
+        provider: 'qq',
+        success: resolve,
+        fail: reject
+      })
+    })
+
+    const authResult = authRes?.authResult || {}
+    const accessToken = authResult.access_token || authResult.accessToken
+    const openId = authResult.openid || authResult.openId
+
+    console.log(' uni.login完成:', {
+      hasAccessToken: !!accessToken,
+      hasOpenId: !!openId
+    })
+
+    if (!accessToken || !openId) {
+      throw new Error('未获取到QQ授权凭证，请重试')
+    }
+
+    let profile = {}
+    try {
+      const userInfoRes = await new Promise((resolve, reject) => {
+        uni.getUserInfo({
+          provider: 'qq',
+          success: resolve,
+          fail: reject
+        })
+      })
+      profile = userInfoRes?.userInfo || {}
+      console.log(' 获取到QQ用户信息', profile)
+    } catch (infoErr) {
+      console.warn(' 获取QQ用户信息失败，将使用后端返回的资料', infoErr)
+    }
+
+    // 使用已有的第三方登录回调接口，传递 type 和临时凭证
+    const backendRes = await request({
+      url: '/auth/login/callback',
+      method: 'POST',
+      needAuth: false,
+      showLoading: false,
+      data: {
+        type: 'qq',
+        code: JSON.stringify({ accessToken, openId, profile: {
+          nickname: profile.nickname || profile.nickName,
+          avatar: profile.figureurl_qq_2 || profile.avatarUrl || profile.avatarUrlHd
+        } })
+      }
+    })
+
+    if (backendRes?.success && backendRes?.token) {
+      await handleLoginSuccess(backendRes)
+    } else {
+      const errorMsg = backendRes?.message || 'QQ登录失败，请稍后重试'
+      throw new Error(errorMsg)
+    }
+  } catch (error) {
+    console.error('❌ QQ登录失败:', error)
+    uni.showToast({
+      title: error?.message || 'QQ登录失败',
+      icon: 'none',
+      duration: 2500
+    })
+  } finally {
+    qqLoginLoading.value = false
+    uni.hideLoading()
+  }
+  // #endif
+
+  // #ifndef APP-PLUS
   uni.showToast({
-    title: '已关闭第三方登录，请使用账号或验证码登录',
+    title: 'QQ登录仅支持App端使用',
     icon: 'none',
     duration: 2000
   })
+  // #endif
 }
 </script>
 
@@ -933,8 +1604,20 @@ const handleQQLogin = () => {
   justify-content: center;
   align-items: center;
   padding: 40rpx;
-  background: linear-gradient(135deg, #667eea 0%, #4facfe 50%, #00f2fe 100%);
+  background: linear-gradient(160deg, #6366f1 0%, #818cf8 30%, #60a5fa 60%, #38bdf8 100%);
   overflow: hidden;
+}
+
+/* 隐藏 H5 验证码容器（仅用于挂载弹窗实例） */
+.captcha-container {
+  position: absolute;
+  width: 320px;
+  height: 50px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  left: -9999px;
+  top: -9999px;
 }
 
 /* 背景装饰 */
@@ -951,7 +1634,7 @@ const handleQQLogin = () => {
 .bg-circle {
   position: absolute;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   animation: float 20s infinite ease-in-out;
 }
 
@@ -994,11 +1677,11 @@ const handleQQLogin = () => {
   z-index: 1;
   width: 100%;
   max-width: 680rpx;
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 32rpx;
-  padding: 60rpx 50rpx;
-  box-shadow: 0 20rpx 100rpx rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(10rpx);
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 36rpx;
+  padding: 60rpx 48rpx;
+  box-shadow: 0 24rpx 80rpx rgba(0, 0, 0, 0.12), 0 4rpx 20rpx rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(20rpx);
 }
 
 /* 头部 */
@@ -1011,12 +1694,12 @@ const handleQQLogin = () => {
   display: inline-flex;
   justify-content: center;
   align-items: center;
-  width: 120rpx;
-  height: 120rpx;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 24rpx;
+  width: 128rpx;
+  height: 128rpx;
+  background: linear-gradient(145deg, #6366f1 0%, #8b5cf6 100%);
+  border-radius: 30rpx;
   margin-bottom: 30rpx;
-  box-shadow: 0 10rpx 30rpx rgba(102, 126, 234, 0.3);
+  box-shadow: 0 12rpx 36rpx rgba(99, 102, 241, 0.35);
 }
 
 .logo-icon {
@@ -1060,9 +1743,9 @@ const handleQQLogin = () => {
 
 .tab-item.active {
   background: #fff;
-  color: #667eea;
+  color: #6366f1;
   font-weight: 600;
-  box-shadow: 0 2rpx 8rpx rgba(102, 126, 234, 0.2);
+  box-shadow: 0 2rpx 10rpx rgba(99, 102, 241, 0.18);
 }
 
 /* 表单 */
@@ -1087,8 +1770,8 @@ const handleQQLogin = () => {
 
 .input-wrapper:focus-within {
   background: #fff;
-  border-color: #667eea;
-  box-shadow: 0 0 0 4rpx rgba(102, 126, 234, 0.1);
+  border-color: #6366f1;
+  box-shadow: 0 0 0 4rpx rgba(99, 102, 241, 0.1);
 }
 
 .input-icon {
@@ -1127,10 +1810,10 @@ const handleQQLogin = () => {
 .code-button {
   height: 72rpx;
   padding: 0 24rpx;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
   color: #fff;
   border: none;
-  border-radius: 12rpx;
+  border-radius: 36rpx;
   font-size: 24rpx;
   font-weight: 500;
   white-space: nowrap;
@@ -1162,7 +1845,7 @@ const handleQQLogin = () => {
 }
 
 .forgot-password {
-  color: #667eea;
+  color: #6366f1;
   font-weight: 500;
 }
 
@@ -1170,15 +1853,16 @@ const handleQQLogin = () => {
 .primary-button {
   width: 100%;
   height: 96rpx;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
   color: #fff;
   border: none;
-  border-radius: 16rpx;
+  border-radius: 48rpx;
   font-size: 32rpx;
   font-weight: 600;
   margin-bottom: 30rpx;
-  box-shadow: 0 8rpx 24rpx rgba(102, 126, 234, 0.3);
+  box-shadow: 0 8rpx 28rpx rgba(99, 102, 241, 0.35);
   transition: all 0.3s;
+  letter-spacing: 2rpx;
 }
 
 .primary-button:active {
@@ -1192,6 +1876,26 @@ const handleQQLogin = () => {
   box-shadow: none;
 }
 
+/* 一键登录按钮 */
+.oneclick-button {
+  width: 100%;
+  height: 88rpx;
+  margin-top: 20rpx;
+  background: #ffffff;
+  border: 2rpx solid #6366f1;
+  border-radius: 44rpx;
+  font-size: 30rpx;
+  color: #6366f1;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+}
+
+.oneclick-button:disabled {
+  opacity: 0.6;
+  color: #9aa0a6;
+  border-color: #d0d0d0;
+}
+
 /* 注册链接 */
 .register-link {
   text-align: center;
@@ -1200,7 +1904,7 @@ const handleQQLogin = () => {
 }
 
 .link-text {
-  color: #667eea;
+  color: #6366f1;
   font-weight: 500;
   margin-left: 8rpx;
 }
@@ -1213,70 +1917,112 @@ const handleQQLogin = () => {
 .divider {
   display: flex;
   align-items: center;
-  margin-bottom: 30rpx;
+  margin-bottom: 40rpx;
 }
 
 .divider-line {
   flex: 1;
   height: 1rpx;
-  background: #e5e5ea;
+  background: linear-gradient(90deg, transparent, #e0e0e5, transparent);
 }
 
 .divider-text {
-  margin: 0 20rpx;
+  margin: 0 24rpx;
   font-size: 24rpx;
-  color: #8e8e93;
+  color: #aeaeb2;
+  white-space: nowrap;
 }
 
 .third-party-buttons {
   display: flex;
-  justify-content: space-around;
+  justify-content: center;
+  gap: 60rpx;
 }
 
 .third-party-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  cursor: pointer;
-  transition: transform 0.3s;
+  justify-content: center;
+  transition: transform 0.2s ease, opacity 0.2s;
 }
 
 .third-party-item:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
+  opacity: 0.8;
+}
+
+.third-party-item.disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .third-party-icon {
-  width: 100rpx;
-  height: 100rpx;
+  width: 96rpx;
+  height: 96rpx;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 48rpx;
-  margin-bottom: 16rpx;
-  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.1);
+  font-size: 40rpx;
+  margin-bottom: 14rpx;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
+  transition: box-shadow 0.2s;
 }
 
 .third-party-icon.wechat {
-  background: linear-gradient(135deg, #07c160 0%, #06ad56 100%);
+  background: linear-gradient(145deg, #2dc100 0%, #07c160 50%, #06ad56 100%);
+  font-size: 36rpx;
 }
 
-.third-party-icon.alipay {
-  background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+.third-party-icon.email {
+  background: linear-gradient(145deg, #ff6b35 0%, #f97316 50%, #ea580c 100%);
+  font-size: 38rpx;
 }
 
 .third-party-icon.qq {
-  background: linear-gradient(135deg, #12b7f5 0%, #0ea5e9 100%);
-}
-
-.third-party-icon.douyin {
-  background: linear-gradient(135deg, #111 0%, #222 100%);
-  color: #fff;
+  background: linear-gradient(145deg, #4dc8f8 0%, #12b7f5 50%, #0ea5e9 100%);
+  font-size: 38rpx;
+  font-weight: 800;
+  font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
 }
 
 .third-party-text {
+  font-size: 22rpx;
+  color: #8e8e93;
+  font-weight: 500;
+}
+
+.email-login-tabs {
+  display: flex;
+  background: #f5f5f7;
+  border-radius: 16rpx;
+  padding: 6rpx;
+  margin-bottom: 24rpx;
+}
+
+.email-login-tab {
+  flex: 1;
+  text-align: center;
+  padding: 16rpx 0;
+  font-size: 26rpx;
+  color: #8e8e93;
+  border-radius: 12rpx;
+}
+
+.email-login-tab.active {
+  background: #fff;
+  color: #667eea;
+  font-weight: 600;
+  box-shadow: 0 2rpx 8rpx rgba(102, 126, 234, 0.2);
+}
+
+.code-tip {
   font-size: 24rpx;
   color: #8e8e93;
+  margin-top: 12rpx;
 }
 
 /* 错误提示 */

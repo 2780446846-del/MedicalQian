@@ -200,7 +200,7 @@ export default {
 };
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 .page {
   display: flex;
   flex-direction: column;

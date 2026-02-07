@@ -22,6 +22,8 @@ export const WEBRTC_CONFIG = {
   ],
   
   // 媒体约束
+  // #ifdef H5
+  // H5 端：使用标准的 WebRTC API
   MEDIA_CONSTRAINTS: {
     video: {
       width: { ideal: 1280 },
@@ -34,5 +36,26 @@ export const WEBRTC_CONFIG = {
       autoGainControl: true
     }
   }
+  // #endif
+  
+  // #ifdef APP-PLUS
+  // App 端：可能需要不同的配置
+  // MEDIA_CONSTRAINTS: {
+  //   video: {
+  //     width: { ideal: 1280 },
+  //     height: { ideal: 720 },
+  //     frameRate: { ideal: 30 }
+  //   },
+  //   audio: true
+  // }
+  // #endif
+  
+  // #ifdef MP-WEIXIN
+  // 微信小程序：使用小程序的 live-pusher 和 live-player 组件
+  // 不使用标准的 WebRTC API
+  // MEDIA_CONSTRAINTS: {
+  //   // 小程序特定配置
+  // }
+  // #endif
 }
 

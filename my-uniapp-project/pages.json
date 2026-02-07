@@ -26,7 +26,7 @@
     {
       "path": "pages/buy-medicine/index",
       "style": {
-        "navigationBarTitleText": "买药",
+        "navigationBarTitleText": "Buy Medicine",
         "backgroundColor": "#FFFFFF"
       }
     },
@@ -448,9 +448,9 @@
       },
       {
         "pagePath": "pages/buy-medicine/index",
-        "text": "买药",
-        "iconPath": "static/tabbar/买药.png",
-        "selectedIconPath": "static/tabbar/买药-选中.png"
+        "text": "Medicine",
+        "iconPath": "static/tabbar/medicine.png",
+        "selectedIconPath": "static/tabbar/medicine-active.png"
       },
       {
         "pagePath": "pages/yishuo/yishuo",

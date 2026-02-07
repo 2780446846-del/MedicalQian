@@ -53,7 +53,11 @@ const loadSessions = () => {
   }
 };
 
-const handleSendMessage = async (overrideMessage?: string) => {
+const handleSendMessage = async (overrideMessage?: string | Event) => {
+  // 如果是事件对象，忽略它
+  if (overrideMessage instanceof Event) {
+    overrideMessage = undefined;
+  }
   const content = overrideMessage ?? inputValue.value.trim();
   if (!content || loading.value) return;
 
@@ -181,9 +185,12 @@ const handleDeleteSession = (sessionId: string) => {
       sessions.value = allSessions;
 
       if (currentSession.value?.id === sessionId && allSessions.length > 0) {
-        chatService.switchSession(allSessions[0].id);
-        currentSession.value = allSessions[0];
-        messages.value = allSessions[0].messages;
+        const firstSession = allSessions[0];
+        if (firstSession) {
+          chatService.switchSession(firstSession.id);
+          currentSession.value = firstSession;
+          messages.value = firstSession.messages;
+        }
       } else if (allSessions.length === 0) {
         currentSession.value = null;
         messages.value = [];

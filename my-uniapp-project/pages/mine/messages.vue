@@ -240,7 +240,9 @@ export default {
       line-height: 1.5;
       display: -webkit-box;
       -webkit-box-orient: vertical;
+      box-orient: vertical;
       -webkit-line-clamp: 2;
+      line-clamp: 2;
       overflow: hidden;
       word-break: break-all;
     }

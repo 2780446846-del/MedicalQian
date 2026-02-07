@@ -7,44 +7,54 @@
   </view>
 </template>
 
-<script setup>
+<script>
 import { ref, onMounted, onUnmounted } from 'vue';
 import { toggleTheme, getCurrentTheme } from '@/utils/theme.js';
 
-const isDark = ref(false);
+export default {
+  name: 'ThemeToggle',
+  setup() {
+    const isDark = ref(false);
 
-// 处理主题切换
-const handleToggle = () => {
-  const newTheme = toggleTheme();
-  isDark.value = newTheme.name === 'dark';
-  
-  // 添加切换动画反馈
-  if (uni.vibrateShort) {
-    try {
-      uni.vibrateShort();
-    } catch (e) {
-      // 忽略震动失败
-    }
+    // 处理主题切换
+    const handleToggle = () => {
+      const newTheme = toggleTheme();
+      isDark.value = newTheme.name === 'dark';
+      
+      // 添加切换动画反馈
+      if (uni.vibrateShort) {
+        try {
+          uni.vibrateShort();
+        } catch (e) {
+          // 忽略震动失败
+        }
+      }
+    };
+
+    // 更新主题状态
+    const updateTheme = () => {
+      const theme = getCurrentTheme();
+      isDark.value = theme.name === 'dark';
+    };
+
+    // 组件挂载时初始化主题
+    onMounted(() => {
+      updateTheme();
+      // 监听主题变更事件
+      uni.$on('themeChange', updateTheme);
+    });
+
+    // 组件卸载时移除事件监听
+    onUnmounted(() => {
+      uni.$off('themeChange', updateTheme);
+    });
+
+    return {
+      isDark,
+      handleToggle
+    };
   }
 };
-
-// 更新主题状态
-const updateTheme = () => {
-  const theme = getCurrentTheme();
-  isDark.value = theme.name === 'dark';
-};
-
-// 组件挂载时初始化主题
-onMounted(() => {
-  updateTheme();
-  // 监听主题变更事件
-  uni.$on('themeChange', updateTheme);
-});
-
-// 组件卸载时移除事件监听
-onUnmounted(() => {
-  uni.$off('themeChange', updateTheme);
-});
 </script>
 
 <style lang="scss" scoped>

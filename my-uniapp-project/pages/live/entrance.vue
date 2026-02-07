@@ -66,8 +66,16 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted } from 'vue'
-import { API_BASE_URL } from '@/utils/config.js'
+import request from '@/utils/request'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 // 直播间数量
 const liveCount = ref(0)
@@ -75,19 +83,17 @@ const liveCount = ref(0)
 // 获取直播间数量
 const fetchLiveCount = async () => {
   try {
-    const response = await uni.request({
-      url: `${API_BASE_URL}/webrtc/rooms`,
-      method: 'GET'
+    const res: any = await request({
+      url: '/webrtc/rooms',
+      method: 'GET',
+      needAuth: false,
+      showLoading: false,
+      showError: false
     })
-    
-    if (response.statusCode === 200 && response.data) {
-      const data = response.data as any
-      if (data.success && data.data) {
-        liveCount.value = data.data.length || 0
-        console.log('当前直播间数量:', liveCount.value)
-      } else {
-        liveCount.value = 0
-      }
+
+    if (res?.success && Array.isArray(res.data)) {
+      liveCount.value = res.data.length
+      console.log('当前直播间数量:', liveCount.value)
     } else {
       liveCount.value = 0
     }

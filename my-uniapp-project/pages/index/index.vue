@@ -256,17 +256,24 @@
       </view>
     </view>
 
+    <!-- 主题切换按钮 -->
+    <ThemeToggle />
   </view>
-  
-  <!-- 主题切换按钮 -->
-  <ThemeToggle />
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted, onUnmounted } from 'vue'
-import ThemeToggle from '@/components/ThemeToggle.vue'
-import { getAllArticles } from '@/utils/articleStorage.js'
-import { API_BASE_URL } from '@/utils/config.js'
+import ThemeToggle from '../../components/ThemeToggle.vue'
+import { getAllArticles } from '../../utils/articleStorage'
+import { API_BASE_URL } from '../../utils/config.example'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 // 检查登录状态
 function checkLogin(): boolean {

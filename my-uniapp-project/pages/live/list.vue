@@ -70,8 +70,16 @@
 </template>
 
 <script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref, onMounted, onUnmounted } from 'vue'
-import { API_BASE_URL } from '@/utils/config.js'
+import request from '@/utils/request'
+
+// 声明全局变量
+declare const uni: any;
+declare const plus: any;
+declare function getCurrentPages(): any[];
+declare function getApp(): any;
 
 // 直播间列表
 const liveRooms = ref<any[]>([])
@@ -86,20 +94,19 @@ const fetchLiveRooms = async () => {
   try {
     isLoading.value = true
     
-    // 调用后端 API 获取直播间列表
-    const response = await uni.request({
-      url: `${API_BASE_URL}/webrtc/rooms`,
-      method: 'GET'
+    const res: any = await request({
+      url: '/webrtc/rooms',
+      method: 'GET',
+      needAuth: false,
+      showLoading: false,
+      showError: false
     })
-    
-    if (response.statusCode === 200 && response.data) {
-      const data = response.data as any
-      if (data.success) {
-        liveRooms.value = data.data || []
-        console.log('✅ 获取直播间列表成功:', liveRooms.value.length)
-      } else {
-        console.error('❌ 获取直播间列表失败:', data.message)
-      }
+
+    if (res?.success) {
+      liveRooms.value = res.data || []
+      console.log('✅ 获取直播间列表成功:', liveRooms.value.length)
+    } else {
+      console.error('❌ 获取直播间列表失败:', res?.message)
     }
   } catch (error) {
     console.error('❌ 请求失败:', error)
@@ -430,7 +437,9 @@ onUnmounted(() => {
   line-height: 1.5;
   display: -webkit-box;
   -webkit-box-orient: vertical;
+  box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
 }
 
