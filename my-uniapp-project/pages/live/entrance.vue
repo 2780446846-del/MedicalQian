@@ -67,6 +67,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { API_BASE_URL } from '@/utils/config.js'
 
 // 直播间数量
 const liveCount = ref(0)
@@ -75,7 +76,7 @@ const liveCount = ref(0)
 const fetchLiveCount = async () => {
   try {
     const response = await uni.request({
-      url: 'http://localhost:3000/api/webrtc/rooms',
+      url: `${API_BASE_URL}/webrtc/rooms`,
       method: 'GET'
     })
     

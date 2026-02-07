@@ -35,17 +35,57 @@ export function connectSocket(userId: string, userInfo: { name: string; avatar?:
     try {
       console.log('🔄 正在连接 Socket.IO 服务器...', SOCKET_URL)
 
+      // 临时只使用 polling，避免 WebSocket 握手问题
+      // 连接成功后再考虑启用 websocket 升级
+      const usePollingOnly = true // 设为 false 可以启用 websocket 升级
+      
       socketInstance = io(SOCKET_URL, {
-        transports: ['websocket', 'polling'],
+        // Socket.IO 路径（必须与服务器配置一致）
+        path: '/socket.io/',
+        
+        // 传输方式：如果 usePollingOnly 为 true，只使用 polling
+        // 否则先使用 polling，连接成功后再升级到 websocket
+        transports: usePollingOnly ? ['polling'] : ['polling', 'websocket'],
+        
+        // 自动重连配置
         reconnection: true,
         reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
         reconnectionAttempts: 5,
-        timeout: 20000
+        
+        // 连接超时（毫秒）
+        timeout: 20000,
+        
+        // 允许升级传输方式（从 polling 升级到 websocket）
+        // 如果只使用 polling，这个选项会被忽略
+        upgrade: !usePollingOnly,
+        
+        // 强制使用新的连接（不使用缓存）
+        // 这可以避免使用之前失败的连接
+        forceNew: true,
+        
+        // 记住传输方式偏好
+        rememberUpgrade: false,
+        
+        // 调试模式（开发环境）
+        ...(import.meta.env.DEV && {
+          // 在开发环境启用详细日志
+          debug: false // 设为 true 可以看到更多调试信息
+        })
+      })
+      
+      console.log('🔧 Socket.IO 连接配置:', {
+        url: SOCKET_URL,
+        path: '/socket.io/',
+        transports: usePollingOnly ? ['polling'] : ['polling', 'websocket'],
+        upgrade: !usePollingOnly,
+        forceNew: true
       })
 
       // 连接成功
       socketInstance.on('connect', () => {
         console.log('✅ Socket.IO 连接成功:', socketInstance?.id)
+        console.log('📡 当前传输方式:', (socketInstance as any).io?.engine?.transport?.name || 'unknown')
         isConnected = true
 
         // 发送用户上线事件
@@ -56,6 +96,12 @@ export function connectSocket(userId: string, userInfo: { name: string; avatar?:
 
         resolve(socketInstance!)
       })
+      
+      // 监听传输方式变化
+      socketInstance.on('upgrade', () => {
+        console.log('🔄 Socket.IO 传输方式已升级到 WebSocket')
+        console.log('📡 当前传输方式:', (socketInstance as any).io?.engine?.transport?.name || 'unknown')
+      })
 
       // 用户上线成功
       socketInstance.on('user:online:success', (data) => {
@@ -63,12 +109,68 @@ export function connectSocket(userId: string, userInfo: { name: string; avatar?:
         console.log('📋 当前在线用户:', data.onlineUsers)
       })
 
-      // 连接错误
-      socketInstance.on('connect_error', (error) => {
-        console.error('❌ Socket.IO 连接错误:', error)
-        isConnected = false
-        reject(error)
+      // 监听连接尝试
+      socketInstance.io.on('open', () => {
+        console.log('🔄 Socket.IO 开始连接尝试...')
       })
+      
+      // 监听传输方式
+      socketInstance.io.on('reconnect_attempt', (attemptNumber) => {
+        console.log(`🔄 Socket.IO 重连尝试 ${attemptNumber}...`)
+      })
+      
+      // 连接错误
+      socketInstance.on('connect_error', (error: any) => {
+        console.error('❌ Socket.IO 连接错误:', error)
+        console.error('错误类型:', error.type)
+        console.error('错误描述:', error.description)
+        console.error('错误上下文:', error.context)
+        console.error('连接URL:', SOCKET_URL)
+        console.error('当前传输方式:', (socketInstance as any).io?.engine?.transport?.name || 'unknown')
+        console.error('Socket.IO 状态:', {
+          connected: socketInstance.connected,
+          disconnected: socketInstance.disconnected,
+          id: socketInstance.id
+        })
+        
+        // 提供更详细的错误信息
+        let errorMessage = error.message || '连接失败'
+        if (error.message && error.message.includes('Invalid frame header')) {
+          errorMessage = 'WebSocket连接失败：无效的帧头。这通常意味着：\n1. 后端Socket.IO服务未正确启动\n2. 端口被其他非Socket.IO服务占用\n3. 网络代理或防火墙干扰\n\n请检查：\n- 后端控制台是否显示 "✅ Socket.IO 服务已启动"\n- 访问 http://localhost:3000/socket.io/ 是否返回正常响应'
+        } else if (error.message && error.message.includes('ECONNREFUSED')) {
+          errorMessage = '无法连接到服务器。请确保后端服务正在运行。'
+        } else if (error.message && error.message.includes('timeout')) {
+          errorMessage = '连接超时。请检查网络连接和后端服务状态。'
+        } else if (error.type === 'TransportError') {
+          errorMessage = `传输错误：${error.description || error.message}\n\n可能原因：\n1. WebSocket握手失败\n2. 服务器不支持WebSocket协议\n3. 网络中间件干扰`
+        }
+        
+        // 创建增强的错误对象
+        const enhancedError = new Error(errorMessage)
+        ;(enhancedError as any).originalError = error
+        ;(enhancedError as any).type = error.type || 'TransportError'
+        ;(enhancedError as any).description = error.description
+        
+        isConnected = false
+        reject(enhancedError)
+      })
+      
+      // 监听传输错误（使用类型断言避免TypeScript错误）
+      const ioManager = socketInstance.io as any
+      if (ioManager) {
+        ioManager.on('error', (error: any) => {
+          console.error('❌ Socket.IO IO 错误:', error)
+        })
+        
+        // 监听传输方式变化
+        ioManager.on('upgrade', (transport: any) => {
+          console.log('🔄 Socket.IO 传输方式升级:', transport.name)
+        })
+        
+        ioManager.on('upgradeError', (error: any) => {
+          console.error('❌ Socket.IO 传输升级失败:', error)
+        })
+      }
 
       // 断开连接
       socketInstance.on('disconnect', (reason) => {
@@ -484,7 +586,8 @@ export function onIncomingCall(callback: (data: any) => void) {
   if (!socketInstance) {
     return
   }
-
+  // 先移除已有监听，避免重复注册导致同一来电弹两次窗
+  socketInstance.off('call:incoming')
   socketInstance.on('call:incoming', (data) => {
     callback(data)
   })

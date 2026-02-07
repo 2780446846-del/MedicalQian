@@ -71,6 +71,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { API_BASE_URL } from '@/utils/config.js'
 
 // 直播间列表
 const liveRooms = ref<any[]>([])
@@ -87,7 +88,7 @@ const fetchLiveRooms = async () => {
     
     // 调用后端 API 获取直播间列表
     const response = await uni.request({
-      url: 'http://localhost:3000/api/webrtc/rooms',
+      url: `${API_BASE_URL}/webrtc/rooms`,
       method: 'GET'
     })
     

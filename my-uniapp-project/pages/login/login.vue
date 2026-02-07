@@ -255,6 +255,7 @@
 import { ref, computed } from 'vue'
 import { request } from '@/utils/request.js'
 import { setToken, setUserInfo } from '@/utils/auth.js'
+import { API_BASE_URL } from '@/utils/config.js'
 
 // 当前登录方式
 const currentTab = ref('account') // 'account' | 'phone'
@@ -485,7 +486,8 @@ const handleAccountLogin = async () => {
       if (error.errMsg.includes('timeout')) {
         errorMsg = '请求超时，请检查网络连接'
       } else if (error.errMsg.includes('fail')) {
-        errorMsg = '网络请求失败，请检查后端服务是否正常运行（http://localhost:3000）'
+        const baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
+        errorMsg = `网络请求失败，请检查后端服务是否正常运行（${baseOrigin}）`
       } else {
         errorMsg = error.errMsg
       }
@@ -777,7 +779,8 @@ const handleSendCode = async () => {
       if (error.errMsg.includes('timeout')) {
         errorMsg = '请求超时，请检查网络连接'
       } else if (error.errMsg.includes('fail')) {
-        errorMsg = '网络请求失败，请检查后端服务是否运行（http://localhost:3000）'
+        const baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
+        errorMsg = `网络请求失败，请检查后端服务是否运行（${baseOrigin}）`
       } else {
         errorMsg = error.errMsg
       }

@@ -69,7 +69,7 @@
 
 <script>
 import ThemeToggle from '@/components/ThemeToggle.vue'
-import { getAllConsultations, formatTime, saveConsultation } from '@/utils/consultationStorage.js'
+import { getAllConsultations, formatTime, saveConsultation, getConsultationById } from '@/utils/consultationStorage.js'
 import { getUserInfo } from '@/utils/auth.js'
 import request from '@/utils/request.js'
 
@@ -82,7 +82,8 @@ export default {
       consultations: [],
       loading: false,
       currentUserInfo: null,
-      currentUserProfile: null
+      currentUserProfile: null,
+      doctorInfoCache: {} // 缓存医生信息，key为doctorId，value为医生信息对象
     }
   },
   computed: {
@@ -158,7 +159,8 @@ export default {
             console.log('🔄 从后端同步咨询记录，前台账号ID:', frontDeskUserId)
             const response = await request({
               url: `/chat/user-consultations?userId=${frontDeskUserId}`,
-              method: 'GET'
+              method: 'GET',
+              showLoading: false // 禁用默认loading，使用组件自己的loading状态
             })
             
             if (response.success && response.data && response.data.length > 0) {
@@ -181,6 +183,11 @@ export default {
                   createdAt: consultation.createdAt ? new Date(consultation.createdAt).getTime() : Date.now(),
                   updatedAt: consultation.updatedAt ? new Date(consultation.updatedAt).getTime() : Date.now(),
                   messages: [] // 消息列表在查看详情时再加载
+                }
+                
+                // 如果医生信息不完整，异步获取医生信息
+                if (consultation.doctorId && (!consultation.doctorInfo || !consultation.doctorInfo.username)) {
+                  this.fetchDoctorInfo(consultation.doctorId)
                 }
                 
                 // 保存到本地存储（会自动合并，使用前台账号ID作为存储key）
@@ -296,9 +303,22 @@ export default {
         }
       }
       
+      // 尝试从缓存中获取医生信息
+      if (doctorId && this.doctorInfoCache[doctorId]) {
+        const cachedDoctor = this.doctorInfoCache[doctorId]
+        const doctorName = cachedDoctor.username || cachedDoctor.name || cachedDoctor.nickname || cachedDoctor.realname
+        if (doctorName) {
+          return doctorName
+        }
+      }
+      
       // 如果是前台账号，需要根据doctorId获取医生名字
       // 如果doctorId包含名字信息，尝试提取
       if (doctorId) {
+        // 固定医生 qmp 的 ID，无 doctorInfo 时回退显示用户名
+        if (doctorId === '6954c80b51429de7970bc551') {
+          return 'qmp'
+        }
         // 如果doctorId以doctor_开头，去掉前缀后作为显示名称
         if (doctorId.startsWith('doctor_')) {
           const doctorIdWithoutPrefix = doctorId.replace('doctor_', '')
@@ -325,6 +345,42 @@ export default {
       
       // 默认返回医生
       return '医生'
+    },
+    
+    // 根据医生ID获取医生信息（异步，作为备用方案）
+    async fetchDoctorInfo(doctorId) {
+      if (!doctorId) {
+        return
+      }
+      
+      // 如果已经缓存过，不再重复获取
+      if (this.doctorInfoCache[doctorId]) {
+        return
+      }
+      
+      // 标记为正在获取，避免重复请求
+      this.doctorInfoCache[doctorId] = { loading: true }
+      
+      try {
+        // 如果doctorId以doctor_开头，去掉前缀获取实际用户ID
+        let userId = doctorId
+        if (doctorId.startsWith('doctor_')) {
+          userId = doctorId.replace('doctor_', '')
+        }
+        
+        // 注意：这里需要后端提供根据用户ID获取用户信息的接口
+        // 如果后端没有提供，可以跳过此步骤，依赖后端返回的doctorInfo
+        // 由于后端已经在返回咨询记录时填充了doctorInfo，这里主要是作为备用方案
+        
+        console.log('ℹ️ 尝试获取医生信息（备用方案）:', doctorId)
+        // 如果后端没有提供根据用户ID获取用户信息的接口，这里可以跳过
+        // 因为后端已经在返回咨询记录时填充了doctorInfo
+        
+      } catch (error) {
+        console.error('❌ 获取医生信息失败:', doctorId, error)
+        // 如果获取失败，标记为已尝试，避免重复请求
+        this.doctorInfoCache[doctorId] = { username: null }
+      }
     },
     
     // 获取医生详情（性别、年龄等）
@@ -393,8 +449,24 @@ export default {
         app.globalData = {}
       }
       
+      // 关键：确保能拿到稳定的 patientId（否则 chat.vue 会回退到本地缓存的第一个患者）
+      const currentPatientRaw = consultation?.patientInfo || {}
+      const patientName = (currentPatientRaw?.name || '未知患者').trim()
+      const patientGender = (currentPatientRaw?.gender || '').trim()
+      const patientAge = currentPatientRaw?.age ?? ''
+      const patientKeyForId = `${patientName}|${patientGender}|${patientAge}`
+      const resolvedPatientId =
+        consultation?.patientId ||
+        currentPatientRaw?.id ||
+        currentPatientRaw?._id ||
+        // 兜底：基于患者信息生成一个稳定ID，避免多患者被“currentPatientId”覆盖
+        `patient_${encodeURIComponent(patientKeyForId)}`
+      
       // 获取当前选中的患者信息（图二中的信息：姓名、性别、年龄）
-      const currentPatient = consultation.patientInfo || {}
+      const currentPatient = {
+        ...currentPatientRaw,
+        id: resolvedPatientId
+      }
       // 通过患者信息（姓名+性别+年龄）生成唯一标识，通过图二中的信息来区分
       const getPatientKey = (patientInfo) => {
         const name = (patientInfo.name || '未知患者').trim()
@@ -412,34 +484,70 @@ export default {
       // 判断是否是同一患者（通过姓名+性别+年龄判断，图二中的信息）
       const isSamePatient = currentPatientKey === previousPatientKey && currentPatientKey !== '未知患者||'
       
+      // 从本地存储加载完整的咨询记录（包含消息列表）
+      let fullConsultation = consultation
+      if (consultation.id) {
+        try {
+          // 获取当前登录用户ID
+          const userInfo = this.getUserInfo()
+          const frontDeskUserId = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username || userInfo?.phone || null
+          
+          // 从本地存储获取完整的咨询记录（包含消息列表）
+          const storedConsultation = getConsultationById(consultation.id, frontDeskUserId)
+          if (storedConsultation && storedConsultation.messages && storedConsultation.messages.length > 0) {
+            fullConsultation = storedConsultation
+            console.log('✅ 从本地存储加载完整咨询记录，消息数:', storedConsultation.messages.length)
+          } else {
+            console.log('ℹ️ 本地存储的消息为空，将在聊天页面从后端加载')
+          }
+        } catch (error) {
+          console.warn('⚠️ 从本地存储加载咨询记录失败:', error)
+        }
+      }
+      
+      const resolvedDoctorInfo = fullConsultation.doctorInfo || previousConsultData.doctorInfo
+      const doctorInfoForChat = (resolvedDoctorInfo && (resolvedDoctorInfo.username || resolvedDoctorInfo.name))
+        ? resolvedDoctorInfo
+        : { username: this.getDoctorName(fullConsultation) }
       if (isSamePatient && consultation.id) {
         // 患者相同，继续之前的咨询（恢复咨询进度）
         console.log('✅ 患者相同，继续之前的咨询:', consultation.id, '患者:', currentPatient.name)
         app.globalData.consultData = {
-          description: consultation.symptomDescription || previousConsultData.description || '',
+          description: fullConsultation.symptomDescription || previousConsultData.description || '',
           patient: currentPatient,
-          files: consultation.symptomImages && consultation.symptomImages.length > 0 
-            ? consultation.symptomImages 
+          files: fullConsultation.symptomImages && fullConsultation.symptomImages.length > 0 
+            ? fullConsultation.symptomImages 
             : (previousConsultData.files || []),
           consultationId: consultation.id, // 使用当前咨询记录的ID
-          doctorId: consultation.doctorId || previousConsultData.doctorId,
-          patientId: consultation.patientId || currentPatient.id || previousConsultData.patientId,
-          messages: consultation.messages && consultation.messages.length > 0 
-            ? consultation.messages 
+          doctorId: fullConsultation.doctorId || previousConsultData.doctorId,
+          doctorInfo: doctorInfoForChat,
+          patientId: resolvedPatientId || previousConsultData.patientId,
+          messages: fullConsultation.messages && fullConsultation.messages.length > 0 
+            ? fullConsultation.messages 
             : (previousConsultData.messages || [])
         }
       } else {
         // 患者不同或没有之前的咨询记录，新开咨询页面
         console.log('🆕 患者不同或首次咨询，新开咨询页面，患者:', currentPatient.name)
         app.globalData.consultData = {
-          description: consultation.symptomDescription || '',
+          description: fullConsultation.symptomDescription || '',
           patient: currentPatient,
-          files: consultation.symptomImages || [],
+          files: fullConsultation.symptomImages || [],
           consultationId: consultation.id, // 如果有ID，说明是恢复已有记录；如果没有，会在聊天页面创建新记录
-          doctorId: consultation.doctorId,
-          patientId: consultation.patientId || currentPatient.id,
-          messages: consultation.messages || []
+          doctorId: fullConsultation.doctorId,
+          doctorInfo: doctorInfoForChat,
+          patientId: resolvedPatientId,
+          messages: fullConsultation.messages || []
         }
+      }
+      
+      console.log('📋 传递给聊天页面的消息数量:', app.globalData.consultData.messages?.length || 0)
+      
+      // 同步写入本地缓存，避免 chat.vue 优先用旧的 currentPatientId
+      try {
+        uni.setStorageSync('currentPatientId', resolvedPatientId)
+      } catch (e) {
+        console.warn('⚠️ 写入 currentPatientId 缓存失败:', e)
       }
       
       // 跳转到聊天页面

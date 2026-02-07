@@ -26,7 +26,7 @@
           <p class="doctor-title">{{ accountInfo.role || '普通用户' }}</p>
           <div class="contact-info">
             <div class="contact-item">
-              <span class="contact-icon">🆔</span>
+              <span class="contact-icon">ID</span>
               <span class="contact-text">账号ID {{ accountInfo.id }}</span>
             </div>
             <div class="contact-item">
@@ -156,16 +156,30 @@
             <div class="attendance-desc">高效跟踪考勤和守时情况</div>
             <div class="attendance-grid">
               <div class="time-column">
-                <div class="time-slot">08:00:00</div>
-                <div class="time-slot">13:00:00</div>
-                <div class="time-slot">18:00:00</div>
-                <div class="time-slot">20:00:00</div>
+                <!-- 占位，使时间文字与红色模块垂直对齐 -->
+                <div class="time-slot time-slot-header"></div>
+                <div
+                  v-for="slot in timeSlots"
+                  :key="slot"
+                  class="time-slot"
+                >
+                  {{ slot }}
+                </div>
               </div>
               <div class="days-column">
-                <div v-for="(day, index) in attendanceDays" :key="index" class="day-column">
+                <div
+                  v-for="(day, dayIndex) in attendanceDays"
+                  :key="dayIndex"
+                  class="day-column"
+                >
                   <div class="day-name">{{ day }}</div>
                   <div class="attendance-cells">
-                    <div v-for="i in 4" :key="i" class="attendance-cell present"></div>
+                    <div
+                      v-for="(slot, slotIndex) in timeSlots"
+                      :key="slot"
+                      class="attendance-cell"
+                      :class="attendanceData[dayIndex]?.[slotIndex] ? 'present' : 'absent'"
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -1037,6 +1051,16 @@ const captureAndClockOut = async () => {
         faceVerificationStatus.value = 'success'
         verificationMessage.value = result.message || `验证成功！人脸相似度：${result.similarity_percent}%`
         
+        // 记录本次工作时长到考勤报告（仅限同一天）
+        const startStr = localStorage.getItem('workStartTime')
+        if (startStr) {
+          const startTs = parseInt(startStr, 10)
+          const endTs = Date.now()
+          if (!Number.isNaN(startTs)) {
+            updateAttendanceForPeriod(startTs, endTs)
+          }
+        }
+        
         await new Promise(resolve => setTimeout(resolve, 1000))
         
         // 完成下班打卡
@@ -1152,6 +1176,16 @@ const captureAndClockOut = async () => {
       // 验证成功
       faceVerificationStatus.value = 'success'
       verificationMessage.value = `验证成功！余弦相似度：${similarityPercent}%，距离相似度：${distancePercent}%，平均相似度：${avgPercent}%`
+      
+      // 记录本次工作时长到考勤报告（仅限同一天）
+      const startStr = localStorage.getItem('workStartTime')
+      if (startStr) {
+        const startTs = parseInt(startStr, 10)
+        const endTs = Date.now()
+        if (!Number.isNaN(startTs)) {
+          updateAttendanceForPeriod(startTs, endTs)
+        }
+      }
       
       // 延迟一下显示成功信息
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -1270,6 +1304,109 @@ const tasks = ref([
 
 // 考勤报告日期
 const attendanceDays = ref(['周一', '周二', '周三', '周四', '周五'])
+
+// 考勤时间段
+const timeSlots = ref(['8:00:-10:00', '10:00-12:00', '14:00-16:00', '16:00-18:00'])
+
+// 创建一个空的考勤矩阵（天 × 时间段）
+const createEmptyAttendance = (): boolean[][] => {
+  return attendanceDays.value.map(() =>
+    Array(timeSlots.value.length).fill(false)
+  )
+}
+
+// 从本地读取考勤数据
+const loadAttendanceData = (): boolean[][] => {
+  const saved = localStorage.getItem('attendanceData')
+  if (!saved) return createEmptyAttendance()
+  try {
+    const parsed = JSON.parse(saved)
+    // 简单校验数据结构
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === attendanceDays.value.length &&
+      parsed.every(
+        (row: unknown) =>
+          Array.isArray(row) && row.length === timeSlots.value.length
+      )
+    ) {
+      return parsed
+    }
+  } catch (e) {
+    console.error('解析考勤数据失败:', e)
+  }
+  return createEmptyAttendance()
+}
+
+// 考勤矩阵：true 表示该时间段有工作，false 表示无工作
+const attendanceData = ref<boolean[][]>(loadAttendanceData())
+
+// 保存考勤数据到本地
+const saveAttendanceData = () => {
+  try {
+    localStorage.setItem('attendanceData', JSON.stringify(attendanceData.value))
+  } catch (e) {
+    console.error('保存考勤数据失败:', e)
+  }
+}
+
+// 将 Date 映射到工作日索引（周一=0 ... 周五=4，周末返回 null）
+const getWeekdayIndex = (date: Date): number | null => {
+  const day = date.getDay() // 周日=0, 周一=1 ... 周六=6
+  if (day === 0 || day === 6) return null
+  return day - 1
+}
+
+// 根据开始/结束时间，更新当天对应时间段的考勤
+const updateAttendanceForPeriod = (startMs: number, endMs: number) => {
+  // 只记录同一天内的打卡
+  if (!isSameDay(startMs, endMs)) return
+
+  const startDate = new Date(startMs)
+  const weekdayIndex = getWeekdayIndex(startDate)
+  if (weekdayIndex === null || weekdayIndex < 0 || weekdayIndex >= attendanceDays.value.length) {
+    return
+  }
+
+  // 构造当天各时间段的起止时间
+  const daySlotsStart: number[] = timeSlots.value.map((t) => {
+    const [h, m, s] = t.split(':').map((v) => parseInt(v, 10) || 0)
+    const d = new Date(startDate)
+    d.setHours(h, m, s, 0)
+    return d.getTime()
+  })
+
+  // 最后一个时间段的结束时间：当天 23:59:59
+  const endOfDay = new Date(startDate)
+  endOfDay.setHours(23, 59, 59, 999)
+
+  const daySlotsEnd: number[] = daySlotsStart.map((startTs, index) => {
+    if (index < daySlotsStart.length - 1) {
+      return daySlotsStart[index + 1]
+    }
+    return endOfDay.getTime()
+  })
+
+  // 工作时间区间
+  const workStart = startMs
+  const workEnd = endMs
+
+  // 判断每个时间段与工作时间是否有交集
+  for (let i = 0; i < daySlotsStart.length; i++) {
+    const slotStart = daySlotsStart[i]
+    const slotEnd = daySlotsEnd[i]
+    // 有交集：开始早于段结束，结束晚于段开始
+    const overlap = workStart < slotEnd && workEnd > slotStart
+    if (overlap) {
+      if (!attendanceData.value[weekdayIndex]) {
+        attendanceData.value[weekdayIndex] = Array(timeSlots.value.length).fill(false)
+      }
+      attendanceData.value[weekdayIndex][i] = true
+    }
+  }
+
+  saveAttendanceData()
+}
 </script>
 
 <style scoped>
@@ -1746,6 +1883,11 @@ const attendanceDays = ref(['周一', '周二', '周三', '周四', '周五'])
   color: #666;
 }
 
+/* 与上方“周一/周二...”标题占位对齐 */
+.time-slot-header {
+  visibility: hidden;
+}
+
 .days-column {
   display: flex;
   gap: 12px;
@@ -1777,12 +1919,22 @@ const attendanceDays = ref(['周一', '周二', '周三', '周四', '周五'])
 
 .attendance-cell {
   width: 100%;
-  height: 40px;
+  height: 44px;
   border-radius: 4px;
 }
 
 .attendance-cell.present {
   background: #4CAF50;
+}
+
+.attendance-cell.absent {
+  background: #f44336;
+}
+
+.attendance-grid {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 /* 响应式设计 */

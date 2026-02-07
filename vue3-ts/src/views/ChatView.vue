@@ -55,6 +55,7 @@ const showImagePreview = ref(false)
 const previewImageUrl = ref('')
 const previewImageList = ref<string[]>([])
 const previewCurrentIndex = ref(0)
+const previewImageError = ref(false) // 图片加载错误状态
 
 // 表情选择器相关
 const showEmojiPicker = ref(false)
@@ -68,7 +69,43 @@ const isVideoEnabled = ref(true)
 const callStatusText = ref('')
 const localVideoRef = ref<HTMLVideoElement | null>(null)
 const remoteVideoRef = ref<HTMLVideoElement | null>(null)
+/** 语音通话时播放远程声音，避免用 video 播纯音频导致无声 */
+const remoteAudioRef = ref<HTMLAudioElement | null>(null)
 let callManager: ReturnType<typeof getCallManager> | null = null
+
+/**
+ * 在用户点击"发起/接听语音通话"这类交互之后，主动尝试播放远程音频。
+ * 这样可以尽量绕过浏览器对自动播放带声音媒体的限制。
+ */
+function ensureRemoteAudioPlaying() {
+  // 优先使用 ref，如果不存在则从 DOM 查询
+  let audioEl = remoteAudioRef.value
+  if (!audioEl || audioEl.tagName !== 'AUDIO') {
+    audioEl = document.querySelector('audio.remote-audio') as HTMLAudioElement
+  }
+  
+  if (!audioEl || audioEl.tagName !== 'AUDIO') {
+    console.warn('⚠️ [医者端]ensureRemoteAudioPlaying: 当前不存在远程音频元素，将等待 callManager 的兜底方案')
+    return
+  }
+
+  try {
+    audioEl.muted = false
+    audioEl.volume = 1
+    const playResult = audioEl.play()
+    if (playResult && typeof (playResult as any).then === 'function') {
+      ;(playResult as Promise<void>)
+        .then(() => {
+          console.log('✅ [医者端]用户操作后主动播放远程音频成功')
+        })
+        .catch((err) => {
+          console.warn('⚠️ [医者端]用户操作后播放远程音频失败:', err)
+        })
+    }
+  } catch (error) {
+    console.error('❌ [医者端]ensureRemoteAudioPlaying 调用异常:', error)
+  }
+}
 
 // 简单防抖函数，用于控制自动拉取频率
 function debounce(fn: (...args: any[]) => any, wait = 500) {
@@ -108,6 +145,14 @@ let autoPullTimer: any = null // 定时器
 let lastPullTimestamp: number = 0 // 上次拉取的时间戳
 let isPullingMessages = false // 是否正在拉取消息（防止重复拉取）
 const AUTO_PULL_INTERVAL = 30000 // 自动拉取间隔：30秒
+
+// 分页加载相关
+const INITIAL_MESSAGE_LIMIT = 50 // 初始加载消息数量（从200减少到50）
+const PAGE_SIZE = 30 // 每次加载更多消息的数量
+const isLoadingMore = ref(false) // 是否正在加载更多消息
+const hasMoreMessages = ref(true) // 是否还有更多消息
+const oldestMessageTimestamp = ref<number | null>(null) // 最旧消息的时间戳
+let currentAbortController: AbortController | null = null // 当前请求的取消控制器
 
 // 获取登录信息
 const authStore = useAuthStore()
@@ -337,6 +382,50 @@ async function initSocketService() {
   } catch (error: any) {
     console.error('❌ Socket.IO 初始化失败:', error)
     isConnected.value = false
+    
+    // 分析错误类型，提供更友好的错误信息
+    let errorMessage = '连接失败'
+    let errorDetails = ''
+    
+    if (error.message) {
+      if (error.message.includes('Invalid frame header') || error.message.includes('websocket error')) {
+        errorMessage = 'WebSocket 连接失败'
+        errorDetails = '可能原因：\n1. 后端服务未启动\n2. 端口3000被其他服务占用\n3. 网络连接问题\n\n解决方案：\n请确保后端服务正在运行（http://localhost:3000）'
+      } else if (error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
+        errorMessage = '无法连接到服务器'
+        errorDetails = '后端服务可能未启动，请检查：\n1. 后端服务是否在运行\n2. 端口3000是否被占用\n3. 防火墙设置'
+      } else {
+        errorDetails = error.message
+      }
+    }
+    
+    // 只在首次连接失败时显示弹窗，避免重复提示
+    const hasShownError = sessionStorage.getItem('socket_error_shown')
+    if (!hasShownError) {
+      sessionStorage.setItem('socket_error_shown', 'true')
+      // 使用更友好的提示方式
+      // 使用更简洁的错误提示
+      const fullMessage = `${errorMessage}\n\n${errorDetails}\n\n提示：\n1. 确保后端服务正在运行（http://localhost:3000）\n2. 检查后端控制台是否有错误\n3. 尝试清除浏览器缓存后刷新页面\n4. 连接失败不影响部分功能使用（如通话管理器）`
+      
+      // 使用 confirm 而不是 alert，让用户可以选择是否查看详细信息
+      const userChoice = confirm(fullMessage + '\n\n是否查看详细错误信息？')
+      if (userChoice) {
+        console.group('🔍 Socket.IO 连接错误详情')
+        console.error('错误对象:', error)
+        console.error('错误类型:', error.type)
+        console.error('错误消息:', error.message)
+        console.error('原始错误:', (error as any).originalError)
+        console.groupEnd()
+      }
+      // 5秒后清除标记，允许再次提示（如果用户解决了问题后刷新页面）
+      setTimeout(() => {
+        sessionStorage.removeItem('socket_error_shown')
+      }, 5000)
+    } else {
+      // 已显示过错误，只在控制台记录
+      console.warn('⚠️ Socket.IO 连接失败（已提示用户）:', error.message || '未知错误')
+    }
+    
     // 即使Socket连接失败，也尝试初始化通话管理器（用于本地测试）
     if (!callManager) {
       try {
@@ -346,7 +435,9 @@ async function initSocketService() {
         console.error('❌ 通话管理器初始化也失败:', callError)
       }
     }
-    alert('连接失败: ' + (error.message || '未知错误') + '\n\n请检查后端服务是否启动')
+    
+    // 设置自动重试（可选，避免过于频繁）
+    // 注意：Socket.IO客户端已经有自动重连机制，这里只是作为备用
   }
 }
 
@@ -460,12 +551,29 @@ function handleReceiveMessage(message: any) {
   }
   
   // 医生端接收所有发送给当前医生的消息（fromUserId 是患者ID）
+  // 先解析患者信息卡片（如果存在），以便获取准确的患者姓名
+  let patientCardDataForList: PatientCardData | undefined = undefined
+  if (message.type === 'patient-card') {
+    try {
+      patientCardDataForList = message.extra?.patientCardData || JSON.parse(message.content)
+    } catch (e) {
+      console.error('解析患者信息卡片失败（列表更新）:', e)
+    }
+  }
+  
   // 更新患者列表中的最后一条消息（如果是患者发送的消息）
   if (message.fromUserId && !message.fromUserId.startsWith('doctor_')) {
+    // 优先从患者信息卡片中提取患者姓名
+    let patientNameForList = message.fromUserName || '患者'
+    if (patientCardDataForList && patientCardDataForList.patientInfo) {
+      patientNameForList = patientCardDataForList.patientInfo.name || patientNameForList
+    }
+    
     updatePatientInList(message.fromUserId, {
+      name: patientNameForList, // 使用从消息中提取的准确姓名
       lastMessage: message.type === 'text' 
         ? message.content.substring(0, 50) 
-        : (message.type === 'image' ? '[图片]' : '[消息]'),
+        : (message.type === 'image' ? '[图片]' : message.type === 'patient-card' ? '[咨询]' : '[消息]'),
       lastMessageTime: message.timestamp || Date.now(),
       unreadCount: message.fromUserId !== selectedPatientId.value 
         ? ((patientList.value.find(p => p.id === message.fromUserId)?.unreadCount || 0) + 1)
@@ -514,6 +622,15 @@ function handleReceiveMessage(message: any) {
     if (message.type === 'patient-card') {
       try {
         patientCardData = message.extra?.patientCardData || JSON.parse(message.content)
+        
+              // 确保图片URL格式正确（处理base64）
+              if (patientCardData && patientCardData.images) {
+                patientCardData.images = patientCardData.images.map((img: any) => ({
+                  ...img,
+                  url: img.url ? processImageUrl(img.url) : img.url,
+                  thumb: img.thumb ? processImageUrl(img.thumb) : img.thumb
+                }))
+              }
       } catch (e) {
         console.error('解析患者信息卡片失败:', e)
       }
@@ -521,8 +638,27 @@ function handleReceiveMessage(message: any) {
     
     // 更新患者信息（如果消息中包含患者信息）
     if (message.fromUserId && !message.fromUserId.startsWith('doctor_')) {
+      // 优先从患者信息卡片中提取患者姓名
+      let patientName = message.fromUserName || '患者'
+      let patientAvatar = message.fromUserAvatar || '👤'
+      
+      if (patientCardData && patientCardData.patientInfo) {
+        patientName = patientCardData.patientInfo.name || patientName
+        // 可以从患者信息中提取更多信息，如性别、年龄等
+      }
+      
       const patient = patientList.value.find(p => p.id === message.fromUserId)
       if (patient) {
+        // 如果患者信息卡片中有更准确的姓名，更新患者列表
+        if (patientCardData && patientCardData.patientInfo && patientCardData.patientInfo.name) {
+          updatePatientInList(message.fromUserId, {
+            name: patientCardData.patientInfo.name,
+            isOnline: true
+          })
+        } else if (!patient.isOnline) {
+          updatePatientInList(message.fromUserId, { isOnline: true })
+        }
+        
         // 如果当前选中的患者不是消息发送者，只更新患者列表，不更新当前聊天窗口
         if (selectedPatientId.value === message.fromUserId) {
           patientInfo.value = {
@@ -531,32 +667,65 @@ function handleReceiveMessage(message: any) {
             id: patient.id
           }
         }
-        // 确保患者在线状态已更新
-        if (!patient.isOnline) {
-          updatePatientInList(message.fromUserId, { isOnline: true })
-        }
       } else {
         // 如果患者不在列表中，添加并标记为在线
         updatePatientInList(message.fromUserId, {
-          name: message.fromUserName || '患者',
-          avatar: message.fromUserAvatar || '👤',
+          name: patientName,
+          avatar: patientAvatar,
           isOnline: true
         })
+        
+        // 如果当前没有选中患者，或者选中的患者不是消息发送者，自动选中新患者
+        if (!selectedPatientId.value || selectedPatientId.value !== message.fromUserId) {
+          console.log('🔄 自动选中新患者:', message.fromUserId, patientName)
+          selectedPatientId.value = message.fromUserId
+          const newPatient = patientList.value.find(p => p.id === message.fromUserId)
+          if (newPatient) {
+            patientInfo.value = {
+              name: newPatient.name,
+              avatar: newPatient.avatar || '👤',
+              id: newPatient.id
+            }
+          }
+        }
       }
     }
     
     // 关键：只有当消息来自当前选中的患者时，才添加到当前聊天窗口
     // 如果消息来自其他患者，只更新患者列表，不显示在当前聊天窗口
+    // 但如果当前没有选中患者，则自动选中并显示消息
     if (message.fromUserId && message.fromUserId !== selectedPatientId.value) {
-      console.log('ℹ️ 消息来自其他患者，只更新患者列表，不显示在当前聊天窗口', {
-        fromUserId: message.fromUserId,
-        selectedPatientId: selectedPatientId.value
-      })
-      // 更新最后拉取时间戳（即使不显示，也要更新，避免重复拉取）
-      if (message.timestamp) {
-        lastPullTimestamp = Math.max(lastPullTimestamp, message.timestamp)
+      // 如果当前没有选中患者，自动选中并显示消息
+      if (!selectedPatientId.value) {
+        console.log('🔄 当前没有选中患者，自动选中消息发送者:', message.fromUserId)
+        selectedPatientId.value = message.fromUserId
+        const newPatient = patientList.value.find(p => p.id === message.fromUserId)
+        if (newPatient) {
+          patientInfo.value = {
+            name: newPatient.name,
+            avatar: newPatient.avatar || '👤',
+            id: newPatient.id
+          }
+        } else {
+          // 如果患者不在列表中，使用消息中的信息
+          patientInfo.value = {
+            name: patientCardData?.patientInfo?.name || message.fromUserName || '患者',
+            avatar: message.fromUserAvatar || '👤',
+            id: message.fromUserId
+          }
+        }
+        // 继续处理，显示消息
+      } else {
+        console.log('ℹ️ 消息来自其他患者，只更新患者列表，不显示在当前聊天窗口', {
+          fromUserId: message.fromUserId,
+          selectedPatientId: selectedPatientId.value
+        })
+        // 更新最后拉取时间戳（即使不显示，也要更新，避免重复拉取）
+        if (message.timestamp) {
+          lastPullTimestamp = Math.max(lastPullTimestamp, message.timestamp)
+        }
+        return // 不添加到当前聊天窗口
       }
-      return // 不添加到当前聊天窗口
     }
     
     const chatMessage: Message = {
@@ -567,8 +736,10 @@ function handleReceiveMessage(message: any) {
       avatar: patientInfo.value.avatar,
       timestamp: message.timestamp || Date.now(),
       type: message.type || 'text',
-      // 如果是图片消息，保存图片URL
-      imageUrl: message.type === 'image' ? (message.content || message.extra?.imageUrl) : undefined,
+      // 如果是图片消息，保存图片URL（使用processImageUrl处理）
+      imageUrl: message.type === 'image' 
+        ? processImageUrl(message.content || message.extra?.imageUrl) 
+        : undefined,
       // 如果是患者信息卡片，保存完整数据
       patientCardData: patientCardData
     }
@@ -949,28 +1120,39 @@ let handleClickOutside: ((event: MouseEvent) => void) | null = null
 // 预览图片
 const previewImage = (imageUrl: string | undefined, allImages?: string[]) => {
   if (!imageUrl) {
-    console.warn('预览图片URL为空')
-    return
-  }
-  if (!imageUrl) {
     console.warn('⚠️ 图片URL为空，无法预览')
     return
   }
   
   console.log('🖼️ 预览图片:', imageUrl, '图片列表:', allImages?.length || 0)
   
-  previewImageUrl.value = imageUrl
+  // 重置错误状态
+  previewImageError.value = false
+  
+  // 处理图片URL（包括blob URL、base64、相对路径等）
+  let processedUrl = processImageUrl(imageUrl)
+  
+  // 如果处理后的URL是blob URL，尝试从allImages中找到非blob的URL
+  if (processedUrl.startsWith('blob:') && allImages && allImages.length > 0) {
+    const nonBlobUrl = allImages.find(url => url && !url.startsWith('blob:'))
+    if (nonBlobUrl) {
+      processedUrl = processImageUrl(nonBlobUrl)
+      console.log('🔄 使用非blob URL:', processedUrl.substring(0, 100))
+    }
+  }
+  
+  previewImageUrl.value = processedUrl
   
   // 如果有图片列表，使用列表；否则只显示当前图片
   if (allImages && allImages.length > 0) {
-    previewImageList.value = allImages
-    previewCurrentIndex.value = allImages.indexOf(imageUrl)
+    previewImageList.value = allImages.map(url => processImageUrl(url)).filter(url => url)
+    previewCurrentIndex.value = previewImageList.value.indexOf(processedUrl)
     if (previewCurrentIndex.value === -1) {
       previewCurrentIndex.value = 0
-      previewImageList.value = [imageUrl]
+      previewImageList.value = [processedUrl].filter(url => url)
     }
   } else {
-    previewImageList.value = [imageUrl]
+    previewImageList.value = processedUrl ? [processedUrl] : []
     previewCurrentIndex.value = 0
   }
   
@@ -984,12 +1166,31 @@ const closeImagePreview = () => {
   previewImageUrl.value = ''
   previewImageList.value = []
   previewCurrentIndex.value = 0
+  previewImageError.value = false
 }
 
 // 处理图片预览错误
 const handleImagePreviewError = () => {
-  console.error('图片加载失败:', previewImageUrl.value)
-  alert('图片加载失败')
+  console.error('❌ 图片预览加载失败:', previewImageUrl.value)
+  previewImageError.value = true
+  
+  // 如果是blob URL失败，尝试从列表中找其他可用的URL
+  if (previewImageUrl.value.startsWith('blob:') && previewImageList.value.length > 0) {
+    const nonBlobUrl = previewImageList.value.find(url => url && !url.startsWith('blob:'))
+    if (nonBlobUrl) {
+      console.log('🔄 尝试使用非blob URL:', nonBlobUrl.substring(0, 100))
+      previewImageUrl.value = nonBlobUrl
+      previewImageError.value = false
+      return
+    }
+  }
+  
+  // 尝试加载下一张图片（如果有）
+  if (previewImageList.value.length > 1 && previewCurrentIndex.value < previewImageList.value.length - 1) {
+    setTimeout(() => {
+      nextImage()
+    }, 500)
+  }
 }
 
 // 切换上一张图片
@@ -999,6 +1200,7 @@ const prevImage = () => {
     const imageUrl = previewImageList.value[previewCurrentIndex.value]
     if (imageUrl) {
       previewImageUrl.value = imageUrl
+      previewImageError.value = false // 重置错误状态
     }
   }
 }
@@ -1010,6 +1212,7 @@ const nextImage = () => {
     const imageUrl = previewImageList.value[previewCurrentIndex.value]
     if (imageUrl) {
       previewImageUrl.value = imageUrl
+      previewImageError.value = false // 重置错误状态
     }
   }
 }
@@ -1036,29 +1239,137 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
 })
 
+// 获取 API 基础 origin（用于相对路径拼完整 URL，与医生端实际请求的后端一致）
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'
+
+const getApiOrigin = (): string => {
+  try {
+    const u = new URL(API_BASE_URL)
+    return u.origin
+  } catch {
+    return 'http://localhost:3000'
+  }
+}
+
+// 处理图片URL，确保base64图片有正确的前缀，并处理blob URL
+const processImageUrl = (url: string | undefined): string => {
+  if (!url) return ''
+  
+  // 如果已经是完整的data URL，直接返回
+  if (url.startsWith('data:')) {
+    return url
+  }
+  
+  // 如果是blob URL，尝试转换为base64（如果可能）
+  // 注意：blob URL 可能在页面刷新后失效，需要从原始数据重新创建
+  if (url.startsWith('blob:')) {
+    console.warn('⚠️ 检测到blob URL，可能已失效:', url.substring(0, 50))
+    // blob URL 无法跨页面使用，如果失效则返回空字符串，让错误处理函数处理
+    // 这里返回原URL，让错误处理函数尝试使用备用URL
+    return url
+  }
+  
+  // 如果是base64字符串（没有前缀），添加前缀
+  // 检查是否是base64格式（通常很长且只包含base64字符）
+  if (url.length > 100 && /^[A-Za-z0-9+/=]+$/.test(url.substring(0, 100))) {
+    // 尝试检测图片类型
+    const isPng = url.includes('iVBORw0KGgo') || url.startsWith('iVBOR')
+    const mimeType = isPng ? 'image/png' : 'image/jpeg'
+    return `data:${mimeType};base64,${url}`
+  }
+  
+  // 如果是HTTP/HTTPS URL，直接返回
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  
+  // 如果是相对路径，使用与环境变量一致的 API origin 拼完整 URL（避免医生端与后端不同域时加载失败）
+  if (url.startsWith('/')) {
+    return `${getApiOrigin()}${url}`
+  }
+  
+  // 其他情况（如 file://、本地 path）：医生端无法加载，返回空由占位符处理
+  if (url.startsWith('file:') || /^[a-zA-Z]:[\\/]/.test(url) || url.includes('tmp/') || url.includes('tempFile')) {
+    console.warn('⚠️ 跳过无法加载的本地路径:', url.substring(0, 80))
+    return ''
+  }
+  
+  return url
+}
+
 // 处理图片加载错误
 const handleImageError = (e: Event, imgData?: any) => {
   const img = e.target as HTMLImageElement
-  console.error('图片加载失败:', {
-    src: img.src.substring(0, 100),
-    imgData: imgData
+  const originalSrc = img.src
+  console.error('❌ 图片加载失败:', {
+    src: originalSrc.substring(0, 100),
+    isBlob: originalSrc.startsWith('blob:'),
+    imgData: imgData,
+    hasUrl: !!imgData?.url,
+    hasThumb: !!imgData?.thumb
   })
   
-  // 如果是base64图片，尝试直接设置
-  if (imgData && (imgData.url || imgData.thumb)) {
-    const imageUrl = imgData.url || imgData.thumb
-    if (imageUrl.startsWith('data:')) {
-      img.src = imageUrl
-      return
+  // 如果是blob URL失败，尝试从imgData获取原始数据
+  if (originalSrc.startsWith('blob:')) {
+    console.log('🔄 blob URL失效，尝试使用备用数据')
+    
+    // 尝试使用imgData中的URL
+    if (imgData) {
+      let imageUrl = imgData.url || imgData.thumb
+      if (imageUrl) {
+        // 处理URL格式
+        imageUrl = processImageUrl(imageUrl)
+        console.log('🔄 尝试使用备用URL:', imageUrl.substring(0, 100))
+        
+        // 如果URL不同，尝试重新加载
+        if (imageUrl !== originalSrc && imageUrl) {
+          img.src = imageUrl
+          return // 等待新的加载结果
+        }
+      }
+    }
+    
+    // 如果imgData中有base64数据，尝试直接使用
+    if (imgData && (imgData.base64 || imgData.content)) {
+      const base64Data = imgData.base64 || imgData.content
+      if (base64Data && typeof base64Data === 'string') {
+        const processedUrl = processImageUrl(base64Data)
+        if (processedUrl && processedUrl !== originalSrc) {
+          console.log('🔄 尝试使用base64数据')
+          img.src = processedUrl
+          return
+        }
+      }
+    }
+  } else {
+    // 非blob URL的错误，尝试使用备用URL
+    if (imgData) {
+      let imageUrl = imgData.url || imgData.thumb
+      if (imageUrl) {
+        imageUrl = processImageUrl(imageUrl)
+        console.log('🔄 尝试使用备用URL:', imageUrl.substring(0, 100))
+        
+        if (imageUrl !== originalSrc && imageUrl) {
+          img.src = imageUrl
+          return
+        }
+      }
     }
   }
   
+  // 如果所有尝试都失败，隐藏图片并显示占位符
   img.style.display = 'none'
-  // 显示占位符
   const placeholder = img.parentElement?.querySelector('.image-placeholder')
   if (placeholder) {
     (placeholder as HTMLElement).style.display = 'block'
     ;(placeholder as HTMLElement).textContent = '图片加载失败'
+  } else {
+    // 如果没有占位符，创建一个
+    const errorDiv = document.createElement('div')
+    errorDiv.className = 'image-placeholder'
+    errorDiv.textContent = '图片加载失败'
+    errorDiv.style.cssText = 'padding: 20px; text-align: center; color: #999; background: #f5f5f5; border-radius: 4px;'
+    img.parentElement?.appendChild(errorDiv)
   }
 }
 
@@ -1072,8 +1383,11 @@ const handleImageLoad = (e: Event) => {
 const getAllImageUrls = (): string[] => {
   return messages.value
     .filter(msg => msg.type === 'image')
-    .map(msg => msg.imageUrl || msg.content)
-    .filter(url => url && url.trim() !== '')
+    .map(msg => {
+      const url = msg.imageUrl || msg.content
+      return url ? processImageUrl(url) : ''
+    })
+    .filter(url => url && url.trim() !== '' && !url.startsWith('blob:')) // 排除blob URL
 }
 
 // 获取头像颜色（根据患者ID生成固定颜色）
@@ -1122,7 +1436,7 @@ async function initPatientList() {
       return
     }
     
-    const apiUrl = `http://localhost:3000/api/chat/consultations?doctorId=${doctor.id}`
+    const apiUrl = `${API_BASE_URL}/chat/consultations?doctorId=${doctor.id}`
     console.log('📡 请求URL:', apiUrl)
     
     const response = await fetch(apiUrl)
@@ -1244,17 +1558,12 @@ function updatePatientInList(patientId: string, patientInfo: Partial<Patient>) {
     const firstPatient = patientList.value[0]
     if (firstPatient && firstPatient.id) {
       selectedPatientId.value = firstPatient.id
-      // 明确类型，避免 TypeScript 错误
-      const newPatientInfo = {
+      // 更新患者信息（使用外部的 patientInfo ref，不是函数参数）
+      patientInfo.value = {
         name: firstPatient.name as string,
         avatar: (firstPatient.avatar || '👤') as string,
         id: firstPatient.id as string
       }
-      // 直接赋值，TypeScript 会自动推断类型
-      const info = patientInfo as any
-      info.value.name = newPatientInfo.name
-      info.value.avatar = newPatientInfo.avatar
-      info.value.id = newPatientInfo.id
       console.log('✅ 自动选中第一个患者:', firstPatient)
     }
   }
@@ -1272,8 +1581,12 @@ async function reloadMessagesFromServer(incremental: boolean = false, sinceTimes
   
   // 如果正在拉取，避免重复请求
   if (isPullingMessages) {
-    console.log('⏳ 正在拉取消息，跳过本次请求')
     return
+  }
+  
+  // 取消之前的请求
+  if (currentAbortController) {
+    currentAbortController.abort()
   }
   
   isPullingMessages = true
@@ -1287,17 +1600,21 @@ async function reloadMessagesFromServer(incremental: boolean = false, sinceTimes
     }
     
     // 构建请求URL
-    let requestUrl = `http://localhost:3000/api/chat/consultation?patientId=${patient.id}&doctorId=${doctor.id}`
+    let requestUrl = `${API_BASE_URL}/chat/consultation?patientId=${patient.id}&doctorId=${doctor.id}`
     
     // 如果是增量拉取，添加时间戳参数（如果后端支持）
     if (incremental && sinceTimestamp) {
       requestUrl += `&since=${sinceTimestamp}`
-      console.log('🔄 增量拉取最新消息（自', new Date(sinceTimestamp).toLocaleString(), '起）...')
     } else {
-      console.log('🔄 从后端获取最新消息历史...', { patientId: patient.id, doctorId: doctor.id })
+      // 非增量拉取时限制数量
+      requestUrl += `&limit=${INITIAL_MESSAGE_LIMIT}`
     }
     
-    const response = await fetch(requestUrl)
+    // 创建新的AbortController
+    currentAbortController = new AbortController()
+    const response = await fetch(requestUrl, {
+      signal: currentAbortController.signal
+    })
     const result = await response.json()
     
     if (result.success && result.data) {
@@ -1315,6 +1632,36 @@ async function reloadMessagesFromServer(incremental: boolean = false, sinceTimes
       const sortedMessages = historyMessages
         .map((msg: any) => {
           const isFromDoctor = msg.fromUserId === doctor.id || msg.fromUserId.startsWith('doctor_')
+          
+          // 解析患者信息卡片（如果存在）
+          let patientCardData: PatientCardData | undefined = undefined
+          if (msg.type === 'patient-card') {
+            try {
+              // 优先从 extra 中获取
+              if (msg.extra?.patientCardData) {
+                patientCardData = msg.extra.patientCardData
+              } else if (msg.content) {
+                // 尝试从 content 中解析 JSON
+                try {
+                  patientCardData = JSON.parse(msg.content)
+                } catch (e) {
+                  console.error('❌ 解析患者信息卡片失败:', e)
+                }
+              }
+              
+              // 确保图片URL格式正确（处理base64）
+              if (patientCardData && patientCardData.images) {
+                patientCardData.images = patientCardData.images.map((img: any) => ({
+                  ...img,
+                  url: img.url ? processImageUrl(img.url) : img.url,
+                  thumb: img.thumb ? processImageUrl(img.thumb) : img.thumb
+                }))
+              }
+            } catch (e) {
+              console.error('❌ 处理患者信息卡片失败:', e)
+            }
+          }
+          
           return {
             id: msg.messageId || msg._id,
             content: msg.content || '',
@@ -1323,10 +1670,17 @@ async function reloadMessagesFromServer(incremental: boolean = false, sinceTimes
             avatar: isFromDoctor ? doctor.avatar : patientInfo.value.avatar,
             timestamp: msg.timestamp || (msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now()),
             type: msg.type || 'text',
-            imageUrl: msg.type === 'image' ? msg.content : undefined
+            imageUrl: msg.type === 'image' ? processImageUrl(msg.content) : undefined,
+            // 添加患者信息卡片数据
+            patientCardData: patientCardData
           }
         })
         .filter((msg: any) => {
+          // 过滤掉空消息（没有内容且不是图片或患者卡片）
+          // 对于患者信息卡片，即使 content 为空，只要有 patientCardData 就保留
+          if (msg.type === 'patient-card') {
+            return !!msg.patientCardData
+          }
           return msg.content || msg.type === 'image' || msg.type === 'patient-card'
         })
         .sort((a: Message, b: Message) => (a.timestamp || 0) - (b.timestamp || 0))
@@ -1480,22 +1834,32 @@ async function selectPatient(patient: Patient) {
     patientInList.unreadCount = 0
   }
   
+  // 重置分页状态
+  hasMoreMessages.value = true
+  oldestMessageTimestamp.value = null
+  isLoadingMore.value = false
+  
+  // 取消之前的请求
+  if (currentAbortController) {
+    currentAbortController.abort()
+    currentAbortController = null
+  }
+  
   // 从数据库加载历史消息
   isLoadingHistory.value = true
   try {
     const doctor = doctorInfo.value
-    console.log('🔄 加载历史消息:', {
-      patientId: patient.id,
-      doctorId: doctor.id,
-      patientName: patient.name
-    })
     
     let historyMessages: any[] = []
     let consultation: any = null
     
-    // 首先尝试从咨询接口获取历史消息
+    // 首先尝试从咨询接口获取历史消息（限制初始加载数量）
     try {
-      const response = await fetch(`http://localhost:3000/api/chat/consultation?patientId=${patient.id}&doctorId=${doctor.id}`)
+      // 创建新的AbortController
+      currentAbortController = new AbortController()
+      const response = await fetch(`${API_BASE_URL}/chat/consultation?patientId=${patient.id}&doctorId=${doctor.id}&limit=${INITIAL_MESSAGE_LIMIT}`, {
+        signal: currentAbortController.signal
+      })
       if (response.ok) {
         const result = await response.json()
         console.log('📦 咨询接口API响应:', {
@@ -1507,6 +1871,11 @@ async function selectPatient(patient: Patient) {
         if (result.success && result.data) {
           consultation = result.data.consultation
           historyMessages = result.data.messages || []
+          
+          // 记录消息数量（简化日志）
+          if (historyMessages.length > 0) {
+            console.log('📋 收到消息:', historyMessages.length, '条')
+          }
           
           // 更新患者信息（使用数据库中的真实信息）
           if (consultation && consultation.patientInfo) {
@@ -1531,8 +1900,11 @@ async function selectPatient(patient: Patient) {
     // 如果咨询接口没有返回消息，尝试从历史消息接口加载
     if (historyMessages.length === 0) {
       try {
-        console.log('🔄 从历史消息接口加载消息...')
-        const historyResponse = await fetch(`http://localhost:3000/api/chat/history?userId=${patient.id}&targetId=${doctor.id}&limit=200`)
+        // 创建新的AbortController
+        currentAbortController = new AbortController()
+        const historyResponse = await fetch(`${API_BASE_URL}/chat/history?userId=${patient.id}&targetId=${doctor.id}&limit=${INITIAL_MESSAGE_LIMIT}`, {
+          signal: currentAbortController.signal
+        })
         if (historyResponse.ok) {
           const historyResult = await historyResponse.json()
           console.log('📦 历史消息接口API响应:', {
@@ -1555,6 +1927,36 @@ async function selectPatient(patient: Patient) {
         .map((msg: any) => {
           // 使用医生ID准确判断消息发送者（确保医生消息显示在右侧）
           const isFromDoctor = msg.fromUserId === doctor.id || msg.fromUserId.startsWith('doctor_')
+          
+          // 解析患者信息卡片（如果存在）
+          let patientCardData: PatientCardData | undefined = undefined
+          if (msg.type === 'patient-card') {
+            try {
+              // 优先从 extra 中获取
+              if (msg.extra?.patientCardData) {
+                patientCardData = msg.extra.patientCardData
+              } else if (msg.content) {
+                // 尝试从 content 中解析 JSON
+                try {
+                  patientCardData = JSON.parse(msg.content)
+                } catch (e) {
+                  console.error('❌ 解析患者信息卡片失败:', e)
+                }
+              }
+              
+              // 确保图片URL格式正确（处理base64）
+              if (patientCardData && patientCardData.images) {
+                patientCardData.images = patientCardData.images.map((img: any) => ({
+                  ...img,
+                  url: img.url ? processImageUrl(img.url) : img.url,
+                  thumb: img.thumb ? processImageUrl(img.thumb) : img.thumb
+                }))
+              }
+            } catch (e) {
+              console.error('❌ 处理患者信息卡片失败:', e)
+            }
+          }
+          
           return {
             id: msg.messageId || msg._id,
             content: msg.content || '',
@@ -1563,28 +1965,65 @@ async function selectPatient(patient: Patient) {
             avatar: isFromDoctor ? doctor.avatar : patientInfo.value.avatar,
             timestamp: msg.timestamp || (msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now()),
             type: msg.type || 'text',
-            imageUrl: msg.type === 'image' ? msg.content : undefined
+            imageUrl: msg.type === 'image' ? processImageUrl(msg.content) : undefined,
+            // 添加患者信息卡片数据
+            patientCardData: patientCardData
           }
         })
         .filter((msg: any) => {
           // 过滤掉空消息（没有内容且不是图片或患者卡片）
+          // 对于患者信息卡片，即使 content 为空，只要有 patientCardData 就保留
+          if (msg.type === 'patient-card') {
+            return !!msg.patientCardData
+          }
           return msg.content || msg.type === 'image' || msg.type === 'patient-card'
         })
         .sort((a: Message, b: Message) => (a.timestamp || 0) - (b.timestamp || 0)) // 按时间戳升序排序（最早的在前）
       
       messages.value = sortedMessages
       
+      // 调试：检查patient-card消息的图片数据
+      const patientCardMessages = sortedMessages.filter(m => m.type === 'patient-card')
+      console.log('📋 patient-card消息数量:', patientCardMessages.length)
+      patientCardMessages.forEach((msg, index) => {
+        console.log(`📦 patient-card消息 ${index + 1}:`, {
+          id: msg.id,
+          hasPatientCardData: !!msg.patientCardData,
+          imageCount: msg.patientCardData?.images?.length || 0,
+          images: msg.patientCardData?.images?.map((img: any) => ({
+            hasUrl: !!img.url,
+            hasThumb: !!img.thumb,
+            urlLength: img.url?.length || 0,
+            urlPreview: img.url?.substring(0, 50),
+            urlStartsWithData: img.url?.startsWith('data:') || false
+          }))
+        })
+      })
+      
       console.log('✅ 加载历史消息成功:', {
         count: sortedMessages.length,
         patientId: patient.id,
         doctorId: doctor.id,
+        patientCardCount: patientCardMessages.length,
         messages: sortedMessages.map(m => ({
           id: m.id,
           sender: m.sender,
+          type: m.type,
           content: m.content?.substring(0, 30),
+          hasPatientCardData: !!m.patientCardData,
+          imageCount: m.patientCardData?.images?.length || 0,
           timestamp: m.timestamp
         }))
       })
+      
+      // 更新分页状态
+      if (messages.value.length > 0) {
+        oldestMessageTimestamp.value = Math.min(...messages.value.map(m => m.timestamp))
+        // 如果返回的消息数量少于限制，说明没有更多消息了
+        hasMoreMessages.value = historyMessages.length >= INITIAL_MESSAGE_LIMIT
+      } else {
+        hasMoreMessages.value = false
+      }
       
       // 滚动到底部显示最新消息
       nextTick(() => {
@@ -1592,19 +2031,155 @@ async function selectPatient(patient: Patient) {
       })
     } else {
       // 如果没有历史记录，清空消息列表
-      console.log('ℹ️ 没有找到历史消息')
+      hasMoreMessages.value = false
       messages.value = []
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ 加载历史消息失败:', error)
-    // 加载失败时清空消息列表
+    // 加载失败时清空消息列表，显示空状态
     messages.value = []
+    // 可以在这里添加错误提示，但不阻塞界面
+    console.warn('⚠️ 加载历史消息失败，但可以继续使用实时消息功能')
   } finally {
     isLoadingHistory.value = false
   }
   
   // 重新初始化Socket连接（切换患者）
   initSocketService()
+}
+
+/**
+ * 加载更多历史消息（滚动到顶部时触发）
+ */
+async function loadMoreMessages() {
+  if (!selectedPatientId.value || isLoadingMore.value || !hasMoreMessages.value || !oldestMessageTimestamp.value) {
+    return
+  }
+  
+  isLoadingMore.value = true
+  
+  try {
+    const doctor = doctorInfo.value
+    const patient = patientList.value.find(p => p.id === selectedPatientId.value)
+    if (!patient) {
+      isLoadingMore.value = false
+      return
+    }
+    
+    // 取消之前的请求
+    if (currentAbortController) {
+      currentAbortController.abort()
+    }
+    
+    // 创建新的AbortController
+    currentAbortController = new AbortController()
+    
+    // 获取当前滚动位置
+    const container = chatContainer.value
+    const scrollHeight = container?.scrollHeight || 0
+    
+    // 请求更早的消息
+    const response = await fetch(
+      `${API_BASE_URL}/chat/history?userId=${patient.id}&targetId=${doctor.id}&limit=${PAGE_SIZE}&before=${oldestMessageTimestamp.value}`,
+      { signal: currentAbortController.signal }
+    )
+    
+    if (!response.ok) {
+      throw new Error('加载更多消息失败')
+    }
+    
+    const result = await response.json()
+    
+    if (result.success && result.data && result.data.length > 0) {
+      const olderMessages = result.data.map((msg: any) => {
+        const isFromDoctor = msg.fromUserId === doctor.id || msg.fromUserId.startsWith('doctor_')
+        
+        // 解析患者信息卡片
+        let patientCardData: PatientCardData | undefined = undefined
+        if (msg.type === 'patient-card') {
+          try {
+            if (msg.extra?.patientCardData) {
+              patientCardData = msg.extra.patientCardData
+            } else if (msg.content) {
+              try {
+                patientCardData = JSON.parse(msg.content)
+              } catch (e) {
+                console.error('❌ 解析患者信息卡片失败:', e)
+              }
+            }
+            
+            if (patientCardData && patientCardData.images) {
+              patientCardData.images = patientCardData.images.map((img: any) => ({
+                ...img,
+                url: img.url ? processImageUrl(img.url) : img.url,
+                thumb: img.thumb ? processImageUrl(img.thumb) : img.thumb
+              }))
+            }
+          } catch (e) {
+            console.error('❌ 处理患者信息卡片失败:', e)
+          }
+        }
+        
+        return {
+          id: msg.messageId || msg._id || `msg_${Date.now()}_${Math.random()}`,
+          content: msg.content || '',
+          sender: isFromDoctor ? 'doctor' : 'user',
+          senderName: isFromDoctor ? (doctor.name || '医生') : (msg.fromUserName || patient.name || '患者'),
+          avatar: isFromDoctor ? (doctor.avatar || '👨‍⚕️') : (patient.avatar || '👤'),
+          timestamp: msg.timestamp || (msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now()),
+          type: msg.type || 'text',
+          imageUrl: msg.imageUrl,
+          patientCardData
+        }
+      })
+      
+      // 将旧消息插入到数组开头
+      messages.value = [...olderMessages, ...messages.value]
+      
+      // 更新最旧消息的时间戳
+      if (olderMessages.length > 0) {
+        oldestMessageTimestamp.value = Math.min(...olderMessages.map(m => m.timestamp))
+        // 如果返回的消息数量少于分页大小，说明没有更多消息了
+        hasMoreMessages.value = olderMessages.length >= PAGE_SIZE
+      } else {
+        hasMoreMessages.value = false
+      }
+      
+      // 保持滚动位置（避免跳到底部）
+      nextTick(() => {
+        if (container) {
+          const newScrollHeight = container.scrollHeight
+          container.scrollTop = newScrollHeight - scrollHeight
+        }
+      })
+    } else {
+      hasMoreMessages.value = false
+    }
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      // 请求被取消，忽略错误
+      return
+    }
+    console.error('❌ 加载更多消息失败:', error)
+    hasMoreMessages.value = false
+  } finally {
+    isLoadingMore.value = false
+  }
+}
+
+/**
+ * 处理滚动事件（检测是否滚动到顶部）
+ */
+function handleScroll() {
+  const container = chatContainer.value
+  if (!container || isLoadingMore.value || !hasMoreMessages.value) {
+    return
+  }
+  
+  // 当滚动到顶部附近（100px内）时加载更多
+  if (container.scrollTop < 100) {
+    loadMoreMessages()
+  }
 }
 
 /**
@@ -1666,13 +2241,18 @@ const filteredPatientList = computed(() => {
   
   // 转换为数组
   let result = Array.from(uniquePatients.values())
+
+  // 只显示在线用户（谁在线显示谁）
+  result = result.filter(patient => !!patient.isOnline)
   
   // 如果有搜索关键词，进行过滤
   if (searchKeyword.value.trim()) {
     const keyword = searchKeyword.value.toLowerCase()
-    result = result.filter(patient => 
-      patient.name.toLowerCase().includes(keyword) ||
-      patient.id.toLowerCase().includes(keyword)
+    result = result.filter(patient => {
+      const name = (patient.name || '').toLowerCase()
+      const id = (patient.id || '').toLowerCase()
+      return name.includes(keyword) || id.includes(keyword)
+    }
     )
   }
   
@@ -1703,11 +2283,12 @@ async function toggleDuty(onDuty: boolean) {
       return
     }
     
-    // 发送上岗/下岗事件
+    // 发送上岗/下岗事件（含 username，供患者端展示实际聊天医生）
     socketInstance.emit('doctor:duty', {
       doctorId: doctor.id,
       onDuty: onDuty,
       doctorInfo: {
+        username: doctor.name,
         name: doctor.name,
         avatar: doctor.avatar,
         email: doctor.email,
@@ -1853,12 +2434,42 @@ async function startAudioCall() {
       if (remoteEl) remoteVideo = remoteEl
     }
     
+    // 语音通话必须传入远程音频元素，否则对方声音可能无声
+    let remoteAudio: HTMLAudioElement | null = null
+    // 多次尝试获取音频元素，因为 DOM 可能还在更新
+    for (let i = 0; i < 3 && !remoteAudio; i++) {
+      if (remoteAudioRef.value) {
+        remoteAudio = remoteAudioRef.value as HTMLAudioElement
+      }
+      if (!remoteAudio) {
+        const audioEl = document.querySelector('audio.remote-audio') as HTMLAudioElement
+        if (audioEl && audioEl.tagName === 'AUDIO') {
+          remoteAudio = audioEl
+        }
+      }
+      if (!remoteAudio && i < 2) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+    }
+    
+    if (!remoteAudio) {
+      console.warn('⚠️ [医者端]无法找到远程音频元素，将使用兜底方案')
+    } else {
+      console.log('✅ [医者端]找到远程音频元素:', remoteAudio)
+    }
+    
     await callManager.startCall(
       selectedPatientId.value,
       'audio',
       localVideo,
-      remoteVideo
+      remoteVideo,
+      remoteAudio
     )
+    // 在用户点击"发起语音通话"按钮后，主动尝试播放远程音频一次
+    // 延迟一下，确保音频元素已经设置好
+    setTimeout(() => {
+      ensureRemoteAudioPlaying()
+    }, 200)
     callStatusText.value = '通话中...'
   } catch (error: any) {
     console.error('发起语音通话失败:', error)
@@ -1870,6 +2481,25 @@ async function startAudioCall() {
 // 处理来电
 async function handleIncomingCall(data: any) {
   const { callId, fromUserId, callType: incomingCallType } = data
+  
+  // 🔧 修复：收到新来电时，先清理旧通话状态（如果有）
+  if (callManager) {
+    const currentCallId = callManager.getCurrentCallId()
+    if (currentCallId && currentCallId !== callId) {
+      console.log('🔄 [医者端]收到新来电，清理旧通话状态', {
+        oldCallId: currentCallId,
+        newCallId: callId
+      })
+      // 清理旧通话
+      callManager.endCall()
+      // 等待清理完成
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    
+    // 🔧 修复：立即设置新的 currentCallId，这样后续的信令就不会被忽略
+    callManager.setCurrentCallId(callId)
+    console.log('✅ [医者端]已设置新通话ID:', callId)
+  }
   
   const confirm = window.confirm(
     `来自 ${fromUserId} 的${incomingCallType === 'video' ? '视频' : '语音'}通话，是否接听？`
@@ -1915,13 +2545,45 @@ async function handleIncomingCall(data: any) {
         return
       }
       
+      // 语音通话时传入远程音频元素，确保能听到对方声音
+      let remoteAudio: HTMLAudioElement | null = null
+      // 多次尝试获取音频元素，因为 DOM 可能还在更新
+      for (let i = 0; i < 3 && !remoteAudio; i++) {
+        if (remoteAudioRef.value) {
+          remoteAudio = remoteAudioRef.value as HTMLAudioElement
+        }
+        if (!remoteAudio) {
+          const audioEl = document.querySelector('audio.remote-audio') as HTMLAudioElement
+          if (audioEl && audioEl.tagName === 'AUDIO') {
+            remoteAudio = audioEl
+          }
+        }
+        if (!remoteAudio && i < 2) {
+          await new Promise(resolve => setTimeout(resolve, 50))
+        }
+      }
+      
+      if (!remoteAudio && incomingCallType === 'audio') {
+        console.warn('⚠️ [医者端]接听语音来电时无法找到远程音频元素，将使用兜底方案')
+      } else if (remoteAudio) {
+        console.log('✅ [医者端]接听来电时找到远程音频元素:', remoteAudio)
+      }
+      
       await callManager!.answerCall(
         callId,
         fromUserId,
         incomingCallType,
         localVideo,
-        remoteVideo
+        remoteVideo,
+        remoteAudio
       )
+      // 如果是语音来电，接听后主动尝试播放远程音频
+      // 延迟一下，确保音频元素已经设置好
+      if (incomingCallType === 'audio') {
+        setTimeout(() => {
+          ensureRemoteAudioPlaying()
+        }, 200)
+      }
     } catch (error: any) {
       console.error('接听通话失败:', error)
       alert('接听失败')
@@ -1930,6 +2592,8 @@ async function handleIncomingCall(data: any) {
   } else {
     if (callManager) {
       callManager.rejectCall(callId)
+      // 如果拒绝了，清除 currentCallId
+      callManager.setCurrentCallId(null)
     }
   }
 }
@@ -1970,8 +2634,16 @@ function initCallManager() {
     callManager = getCallManager()
     console.log('✅ [医者端]通话管理器已初始化')
   }
-  
-  // 监听来电
+  // 对方挂断时显示「对方已挂断」，约 1.5 秒后关闭通话界面
+  callManager.setOnEndedByRemote(() => {
+    callStatusText.value = '对方已挂断'
+    setTimeout(() => {
+      isInCall.value = false
+      callStatusText.value = ''
+    }, 1500)
+  })
+  // 先移除旧监听再注册，避免 initCallManager 被多次调用时重复注册导致弹两次窗
+  offIncomingCall()
   onIncomingCall(handleIncomingCall)
   console.log('✅ [医者端]已注册来电监听')
 }
@@ -2071,11 +2743,27 @@ function cleanupCallManager() {
       </div>
 
       <!-- 聊天消息区域 -->
-      <div ref="chatContainer" class="chat-messages">
+      <div ref="chatContainer" class="chat-messages" @scroll="handleScroll">
+        <!-- 加载更多消息提示 -->
+        <div v-if="isLoadingMore" class="loading-more">
+          <div class="loading-spinner-small"></div>
+          <span>正在加载更多消息...</span>
+        </div>
+        <div v-else-if="!hasMoreMessages && messages.length > 0" class="no-more-messages">
+          <span>没有更多消息了</span>
+        </div>
+        
         <!-- 加载历史消息提示 -->
         <div v-if="isLoadingHistory" class="loading-history">
           <div class="loading-spinner"></div>
           <span class="loading-text">正在加载历史消息...</span>
+        </div>
+        
+        <!-- 空状态提示 -->
+        <div v-else-if="!isLoadingHistory && selectedPatientId && messages.length === 0" class="empty-messages">
+          <div class="empty-icon">💬</div>
+          <div class="empty-text">暂无消息</div>
+          <div class="empty-hint">开始与 {{ patientInfo.name }} 的对话吧</div>
         </div>
         
         <div
@@ -2108,17 +2796,19 @@ function cleanupCallManager() {
                     v-for="(img, index) in message.patientCardData.images"
                     :key="index"
                     class="image-item"
-                    @click="previewImage(img.url || img.thumb || '', message.patientCardData.images.map(i => i.url || i.thumb || '').filter(url => url))"
+                    @click="() => { const u = processImageUrl(img.thumb || img.url); const list = message.patientCardData.images.map(i => processImageUrl(i.thumb || i.url)).filter(Boolean); if (u && list.length) previewImage(u, list); }"
                   >
-                    <img 
-                      :src="img.thumb || img.url" 
-                      :alt="`图片 ${index + 1}`" 
-                      class="symptom-img"
-                      @error="(e) => handleImageError(e, img)"
-                      @load="handleImageLoad"
-                    />
-                    <div v-if="img.type === 'video'" class="video-badge">视频</div>
-                    <div v-if="!img.thumb && !img.url" class="image-placeholder">图片加载中...</div>
+                    <template v-if="processImageUrl(img.thumb || img.url)">
+                      <img 
+                        :src="processImageUrl(img.thumb || img.url)" 
+                        :alt="`图片 ${index + 1}`" 
+                        class="symptom-img"
+                        @error="(e) => handleImageError(e, img)"
+                        @load="handleImageLoad"
+                      />
+                      <div v-if="img.type === 'video'" class="video-badge">视频</div>
+                    </template>
+                    <div v-else class="image-placeholder">图片加载失败</div>
           </div>
             </div>
               </div>
@@ -2133,15 +2823,20 @@ function cleanupCallManager() {
               <!-- 图片内容 -->
               <div v-if="message.type === 'image'" class="message-image-wrapper">
                 <img 
-                  :src="message.imageUrl || message.content" 
+                  :src="processImageUrl(message.imageUrl || message.content)" 
                   alt="图片"
                   class="message-image"
-                  @click="previewImage(message.imageUrl || message.content, getAllImageUrls())"
+                  @click="previewImage(processImageUrl(message.imageUrl || message.content), getAllImageUrls())"
                   @error="(e) => {
-                    console.error('图片加载失败:', message.imageUrl || message.content);
-                    (e.target as HTMLImageElement).style.display = 'none';
+                    console.error('❌ 图片加载失败:', {
+                      originalUrl: message.imageUrl || message.content,
+                      processedUrl: (e.target as HTMLImageElement).src,
+                      messageId: message.id
+                    });
+                    handleImageError(e, { url: message.imageUrl, content: message.content });
                   }"
                 />
+                <div v-if="!message.imageUrl && !message.content" class="image-placeholder">图片加载中...</div>
           </div>
               <!-- 如果消息内容为空且不是图片，不显示 -->
               <div v-if="!message.content && message.type !== 'image' && message.type !== 'patient-card'" class="message-text" style="color: #999; font-style: italic;">
@@ -2161,15 +2856,20 @@ function cleanupCallManager() {
               <!-- 图片内容 -->
               <div v-if="message.type === 'image'" class="message-image-wrapper">
                 <img 
-                  :src="message.imageUrl || message.content" 
+                  :src="processImageUrl(message.imageUrl || message.content)" 
                   alt="图片"
                   class="message-image"
-                  @click="previewImage(message.imageUrl || message.content, getAllImageUrls())"
+                  @click="previewImage(processImageUrl(message.imageUrl || message.content), getAllImageUrls())"
                   @error="(e) => {
-                    console.error('图片加载失败:', message.imageUrl || message.content);
-                    (e.target as HTMLImageElement).style.display = 'none';
+                    console.error('❌ 图片加载失败:', {
+                      originalUrl: message.imageUrl || message.content,
+                      processedUrl: (e.target as HTMLImageElement).src,
+                      messageId: message.id
+                    });
+                    handleImageError(e, { url: message.imageUrl, content: message.content });
                   }"
                 />
+                <div v-if="!message.imageUrl && !message.content" class="image-placeholder">图片加载中...</div>
               </div>
               <!-- 如果消息内容为空且不是图片，不显示 -->
               <div v-if="!message.content && message.type !== 'image' && message.type !== 'patient-card'" class="message-text" style="color: #999; font-style: italic;">
@@ -2250,11 +2950,19 @@ function cleanupCallManager() {
               ‹
             </button>
             <img 
+              v-if="!previewImageError"
               :src="previewImageUrl" 
               alt="预览图片"
               class="image-preview-img"
               @error="handleImagePreviewError"
+              @load="previewImageError = false"
             />
+            <div v-else class="image-preview-error">
+              <div class="error-icon">⚠️</div>
+              <div class="error-text">图片加载失败</div>
+              <div class="error-hint">图片URL: {{ previewImageUrl.substring(0, 50) }}{{ previewImageUrl.length > 50 ? '...' : '' }}</div>
+              <button class="error-retry-btn" @click.stop="previewImageError = false; previewImageUrl = previewImageUrl">重试</button>
+            </div>
             <button 
               v-if="previewImageList.length > 1 && previewCurrentIndex < previewImageList.length - 1"
               class="image-preview-nav image-preview-next"
@@ -2270,7 +2978,7 @@ function cleanupCallManager() {
                 :key="index"
                 class="image-preview-dot"
                 :class="{ active: index === previewCurrentIndex }"
-                @click.stop="previewCurrentIndex = index; previewImageUrl = img"
+                @click.stop="previewCurrentIndex = index; previewImageUrl = img; previewImageError = false"
               ></span>
             </div>
           </div>
@@ -2282,13 +2990,15 @@ function cleanupCallManager() {
     <!-- 通话界面 -->
     <div v-if="isInCall" class="call-modal">
       <div class="call-content">
-        <!-- 远程视频 -->
+        <!-- 远程视频（视频通话显示；语音通话时仅用远程音频） -->
         <video
           ref="remoteVideoRef"
           class="remote-video"
           autoplay
           playsinline
         ></video>
+        <!-- 语音通话时用此 audio 播放对方声音，避免 video 无视频轨时无声 -->
+        <audio ref="remoteAudioRef" class="remote-audio" autoplay playsinline></audio>
         
         <!-- 本地视频（小窗口） -->
         <video
@@ -2707,6 +3417,65 @@ function cleanupCallManager() {
 .loading-text {
   color: #666;
   font-size: 14px;
+}
+
+/* 空状态样式 */
+.empty-messages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #9e9e9e;
+  min-height: 300px;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.empty-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: #6e736c;
+  margin-bottom: 8px;
+}
+
+.empty-hint {
+  font-size: 14px;
+  color: #9e9e9e;
+  text-align: center;
+}
+
+/* 加载更多消息样式 */
+.loading-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  color: #666;
+  font-size: 13px;
+}
+
+.loading-spinner-small {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #e0e0e0;
+  border-top-color: #4a90e2;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.no-more-messages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  color: #999;
+  font-size: 12px;
 }
 
 .message-wrapper {
@@ -3164,6 +3933,54 @@ function cleanupCallManager() {
   display: block;
 }
 
+/* 图片预览错误状态 */
+.image-preview-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  padding: 40px;
+  color: #fff;
+  text-align: center;
+}
+
+.error-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.8;
+}
+
+.error-text {
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #ff6b6b;
+}
+
+.error-hint {
+  font-size: 14px;
+  color: #999;
+  margin-bottom: 24px;
+  word-break: break-all;
+  max-width: 600px;
+}
+
+.error-retry-btn {
+  padding: 10px 24px;
+  background: #667eea;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.error-retry-btn:hover {
+  background: #5568d3;
+}
+
 .image-preview-nav {
   position: absolute;
   top: 50%;
@@ -3361,7 +4178,15 @@ function cleanupCallManager() {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: #000;
+}
+
+/* 语音通话时播放对方声音，不占位、不显示 */
+.remote-audio {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .local-video {
