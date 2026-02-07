@@ -640,7 +640,8 @@ const handleAccountLogin = async () => {
       if (error.errMsg.includes('timeout')) {
         errorMsg = '请求超时，请检查网络连接'
       } else if (error.errMsg.includes('fail')) {
-        errorMsg = '网络请求失败，请检查后端服务是否正常运行（http://localhost:3000）'
+        const baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
+        errorMsg = `网络请求失败，请检查后端服务是否正常运行（${baseOrigin}）`
       } else {
         errorMsg = error.errMsg
       }
@@ -1013,7 +1014,32 @@ const handleCaptchaSuccess = async (result) => {
       }
     }
   } catch (error) {
+<<<<<<< HEAD
+    console.error('❌ 发送验证码异常:', error)
+    console.error('错误详情:', JSON.stringify(error))
+    
+    let errorMsg = '发送失败，请检查网络连接'
+    
+    if (error.message) {
+      errorMsg = error.message
+    } else if (error.errMsg) {
+      if (error.errMsg.includes('timeout')) {
+        errorMsg = '请求超时，请检查网络连接'
+      } else if (error.errMsg.includes('fail')) {
+        const baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
+        errorMsg = `网络请求失败，请检查后端服务是否运行（${baseOrigin}）`
+      } else {
+        errorMsg = error.errMsg
+      }
+    } else if (typeof error === 'string') {
+      errorMsg = error
+    } else if (error.response) {
+      errorMsg = error.response.data?.message || error.response.data?.error || '服务器错误'
+    }
+    
+=======
     const message = error?.message || error?.msg || error?.errMsg || '图形验证码验证失败'
+>>>>>>> origin/main
     uni.showToast({
       title: message,
       icon: 'none',

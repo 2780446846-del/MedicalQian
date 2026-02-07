@@ -446,7 +446,7 @@ const getFullFileUrl = (pathStr: string): string => {
   // 获取后端服务器基础地址
   let baseOrigin = API_BASE_URL.replace(/\/api$/, '')
   if (!baseOrigin || baseOrigin === '/' || baseOrigin.startsWith('/')) {
-    baseOrigin = 'http://localhost:3000'
+    baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
   }
   
   return `${baseOrigin}${path}`

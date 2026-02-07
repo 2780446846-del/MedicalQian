@@ -109,6 +109,7 @@
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import { getCurrentTheme } from '@/utils/theme.js';
 import { post } from '@/utils/api.js';
+import { API_BASE_URL } from '@/utils/config.js';
 // 导入本地存储工具
 import { getAppointmentsByStatus, getAllAppointments as getLocalAllAppointments } from '@/utils/appointmentStorage.js';
 
@@ -865,7 +866,7 @@ export default {
         // 调用后端银联支付接口
         // 注意：银联支付返回的是HTML表单，需要特殊处理
         try {
-          const response = await fetch('http://localhost:3000/api/unionpay/create', {
+          const response = await fetch(`${API_BASE_URL}/unionpay/create`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
