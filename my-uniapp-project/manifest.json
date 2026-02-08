@@ -1,5 +1,4 @@
 {
-<<<<<<< Updated upstream
     "name" : "my-uniapp-project",
     "appid" : "__UNI__E3E33C6",
     "description" : "",
@@ -42,7 +41,10 @@
                     "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
                     "<uses-permission android:name=\"android.permission.FLASHLIGHT\"/>",
                     "<uses-feature android:name=\"android.hardware.camera\"/>",
-                    "<uses-permission android:name=\"android.permission.WRITE_SETTINGS\"/>"
+                    "<uses-permission android:name=\"android.permission.WRITE_SETTINGS\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_LOCATION_EXTRA_COMMANDS\"/>"
                 ]
             },
             "ios" : {
@@ -147,102 +149,3 @@
     "vueVersion" : "3",
     "_qq_spaceID" : "mp-7a43517d-d8d4-4fa6-bf16-36b1c3fe2485"
 }
-=======
-	"name": "my-uniapp-project",
-	"appid": "__UNI__6B3EFFE",
-	"description": "",
-	"versionName": "1.0.0",
-	"versionCode": "100",
-	"transformPx": false,
-	"app-plus": {
-		"usingComponents": true,
-		"nvueCompiler": "uni-app",
-		"nvueStyleCompiler": "uni-app",
-		"splashscreen": {
-			"alwaysShowBeforeRender": true,
-			"waiting": true,
-			"autoclose": true,
-			"delay": 0
-		},
-		"modules": {
-			"Maps": {
-				"amap": {
-					"apiKey": "aab8394f9ad4c8088514c3a844880440"
-				}
-			}
-		},
-		"distribute": {
-			"android": {
-				"permissions": [
-					"<uses-permission android:name=\"android.permission.CHANGE_NETWORK_STATE\"/>",
-					"<uses-permission android:name=\"android.permission.MOUNT_UNMOUNT_FILESYSTEMS\"/>",
-					"<uses-permission android:name=\"android.permission.VIBRATE\"/>",
-					"<uses-permission android:name=\"android.permission.READ_LOGS\"/>",  
-					"<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
-					"<uses-feature android:name=\"android.hardware.camera.autofocus\"/>",
-					"<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
-					"<uses-permission android:name=\"android.permission.CAMERA\"/>",
-					"<uses-permission android:name=\"android.permission.GET_ACCOUNTS\"/>",
-					"<uses-permission android:name=\"android.permission.READ_PHONE_STATE\"/>",
-					"<uses-permission android:name=\"android.permission.CHANGE_WIFI_STATE\"/>",
-					"<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
-					"<uses-permission android:name=\"android.permission.FLASHLIGHT\"/>",
-					"<uses-feature android:name=\"android.hardware.camera\"/>",
-					"<uses-permission android:name=\"android.permission.WRITE_SETTINGS\"/>",
-					"<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
-					"<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>",
-					"<uses-permission android:name=\"android.permission.ACCESS_LOCATION_EXTRA_COMMANDS\"/>"
-				]
-			},
-			"ios": {},
-			"sdkConfigs": {}
-		},
-		"map": {
-			"amap": {
-				"apiKey": "aab8394f9ad4c8088514c3a844880440"
-			}
-		}
-	},
-	"quickapp": {},
-	"h5": {
-		"router": {
-			"mode": "history"
-		},
-		"devServer": {
-			"port": 5174,
-			"host": "localhost",
-			"proxy": {
-				"/api": {
-					"target": "http://localhost:3000",
-					"changeOrigin": true,
-					"secure": false,
-					"timeout": 30000,
-					"proxyTimeout": 30000,
-					"pathRewrite": {
-						"^/api": "/api"
-					}
-				}
-			}
-		}
-	},
-	"mp-weixin": {
-		"appid": "wxb153d99599658512",
-		"setting": {
-			"urlCheck": false
-		},                            
-		"usingComponents": true,
-		"permission": {
-			"scope.userLocation": {
-				"desc": "你的位置信息将用于小程序定位"
-			}
-		},
-		"plugins": {
-			"amapPlugin": {
-				"version": "1.0.1",
-				"provider": "wx63ff832031bd5416"
-			}
-		}
-	},
-	"vueVersion": "3"
-}
->>>>>>> Stashed changes

@@ -97,6 +97,7 @@ const fetchLiveRooms = async () => {
     const res: any = await request({
       url: '/webrtc/rooms',
       method: 'GET',
+      data: {},
       needAuth: false,
       showLoading: false,
       showError: false

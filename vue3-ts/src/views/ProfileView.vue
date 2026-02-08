@@ -1370,7 +1370,10 @@ const updateAttendanceForPeriod = (startMs: number, endMs: number) => {
 
   // 构造当天各时间段的起止时间
   const daySlotsStart: number[] = timeSlots.value.map((t) => {
-    const [h, m, s] = t.split(':').map((v) => parseInt(v, 10) || 0)
+    const parts = t.split(':').map((v) => parseInt(v, 10) || 0)
+    const h = parts[0] ?? 0
+    const m = parts[1] ?? 0
+    const s = parts[2] ?? 0
     const d = new Date(startDate)
     d.setHours(h, m, s, 0)
     return d.getTime()
@@ -1382,7 +1385,8 @@ const updateAttendanceForPeriod = (startMs: number, endMs: number) => {
 
   const daySlotsEnd: number[] = daySlotsStart.map((startTs, index) => {
     if (index < daySlotsStart.length - 1) {
-      return daySlotsStart[index + 1]
+      const nextStart = daySlotsStart[index + 1]
+      return nextStart ?? endOfDay.getTime()
     }
     return endOfDay.getTime()
   })
@@ -1395,6 +1399,9 @@ const updateAttendanceForPeriod = (startMs: number, endMs: number) => {
   for (let i = 0; i < daySlotsStart.length; i++) {
     const slotStart = daySlotsStart[i]
     const slotEnd = daySlotsEnd[i]
+    if (slotStart === undefined || slotEnd === undefined) {
+      continue
+    }
     // 有交集：开始早于段结束，结束晚于段开始
     const overlap = workStart < slotEnd && workEnd > slotStart
     if (overlap) {
