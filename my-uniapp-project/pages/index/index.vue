@@ -92,12 +92,13 @@
           <view class="tab-item" :class="{ active: activeTab === 'orthopedics' }" @click="switchTab('orthopedics')">骨科医院</view>
         </scroll-view>
       </view>
-      <scroll-view class="hospital-scroll" scroll-x show-scrollbar="false">
+      <scroll-view class="hospital-scroll" scroll-x show-scrollbar="false" enable-passive="false">
         <view 
           v-for="hospital in hospitals" 
           :key="hospital.id" 
           class="hospital-card"
-          @click="navigateToHospitalDetail(hospital)"
+          @click.stop="navigateToHospitalDetail(hospital)"
+          @tap.stop="navigateToHospitalDetail(hospital)"
         >
           <view class="hospital-image">
             <image :src="hospital.image" mode="aspectFill" class="hospital-img"></image>
@@ -265,9 +266,9 @@
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
 import { ref, onMounted, onUnmounted } from 'vue'
-import ThemeToggle from '../../components/ThemeToggle.vue'
-import { getAllArticles } from '../../utils/articleStorage'
-import { API_BASE_URL } from '../../utils/config.example'
+import ThemeToggle from '@/components/ThemeToggle.vue'
+import { getAllArticles } from '@/utils/articleStorage.js'
+import { API_BASE_URL } from '@/utils/config.js'
 
 // 声明全局变量
 declare const uni: any;
@@ -302,6 +303,11 @@ interface Hospital {
   distance: string
   appointments: string
   image: string
+  address?: string
+  level?: string
+  phone?: string
+  latitude?: number
+  longitude?: number
 }
 
 interface Specialty {
@@ -496,49 +502,162 @@ const loadArticles = () => {
 
 // 切换分类
 const switchTab = (tab: string) => {
-  activeTab.value = tab
-  // 根据分类筛选医院数据（可以根据实际需求实现）
-  console.log('切换到分类:', tab)
+  console.log('点击切换分类:', tab)
+  try {
+    activeTab.value = tab
+    // 根据分类筛选医院数据（可以根据实际需求实现）
+    console.log('切换到分类:', tab)
+  } catch (error) {
+    console.error('切换分类失败:', error)
+  }
 }
 
 // 立即咨询
 const handleConsult = () => {
-  uni.navigateTo({
-    url: '/pages/online-consult/index'
-  })
+  console.log('点击立即咨询')
+  try {
+    uni.navigateTo({
+      url: '/pages/online-consult/index',
+      success: () => {
+        console.log('跳转到在线问诊成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
 }
 
 // 医生直播 - 跳转到直播入口页面
 const handleLiveStream = () => {
-  uni.navigateTo({
-    url: '/pages/live/entrance'
-  })
+  console.log('点击医生直播')
+  try {
+    uni.navigateTo({
+      url: '/pages/live/entrance',
+      success: () => {
+        console.log('跳转到直播入口成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
 }
 
 // 预约挂号
 const handleAppointment = () => {
-  uni.navigateTo({
-    url: '/pages/doctor/appointment-register'
-  })
+  console.log('点击预约挂号')
+  try {
+    uni.navigateTo({
+      url: '/pages/doctor/appointment-register',
+      success: () => {
+        console.log('跳转到预约挂号成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
 }
 
 // 在线问诊
 const handleOnlineConsult = () => {
-  uni.navigateTo({
-    url: '/pages/online-consult/index'
-  })
+  console.log('点击在线问诊')
+  try {
+    uni.navigateTo({
+      url: '/pages/online-consult/index',
+      success: () => {
+        console.log('跳转到在线问诊成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
 }
 
 // 跳转到医院详情页
 const navigateToHospitalDetail = (hospital: Hospital) => {
+  console.log('点击医院卡片:', hospital)
+  
   try {
+    // 防抖：避免快速重复点击（降低防抖时间，提高响应性）
+    // 注意：第一次点击时 lastClickTime 为 0，所以不会阻止
+    const now = Date.now()
+    if (navigateToHospitalDetail.lastClickTime > 0 && (now - navigateToHospitalDetail.lastClickTime) < 300) {
+      console.log('点击过于频繁，已忽略')
+      return
+    }
+    navigateToHospitalDetail.lastClickTime = now
+    
+    // 确保医院信息完整
+    if (!hospital || !hospital.name) {
+      console.error('医院信息不完整:', hospital)
+      uni.showToast({
+        title: '医院信息不完整',
+        icon: 'error',
+        duration: 2000
+      })
+      return
+    }
+    
+    // 添加点击反馈
+    uni.vibrateShort({
+      type: 'light'
+    }).catch(() => {
+      // 如果设备不支持震动，忽略错误
+    })
+    
+    // 构建URL参数，包含所有必要的医院信息
+    const params = new URLSearchParams()
+    params.append('name', hospital.name)
+    params.append('id', String(hospital.id || ''))
+    if (hospital.distance) params.append('distance', hospital.distance)
+    if (hospital.address) params.append('address', hospital.address)
+    if (hospital.level) params.append('level', hospital.level)
+    if (hospital.image) params.append('image', hospital.image)
+    if (hospital.phone) params.append('phone', hospital.phone)
+    if (hospital.latitude) params.append('latitude', String(hospital.latitude))
+    if (hospital.longitude) params.append('longitude', String(hospital.longitude))
+    
+    const url = `/pages/hospital-detail/index?${params.toString()}`
+    console.log('准备跳转到医院详情页:', url)
+    console.log('医院信息:', hospital)
+    
     uni.navigateTo({
-      url: `/pages/hospital-detail/index?name=${encodeURIComponent(hospital.name)}&distance=${encodeURIComponent(hospital.distance)}&id=${hospital.id}`,
+      url: url,
+      success: () => {
+        console.log('页面跳转成功')
+      },
       fail: (err) => {
         console.error('页面跳转失败:', err)
         uni.showToast({
-          title: '页面跳转失败',
-          icon: 'none',
+          title: '页面跳转失败，请重试',
+          icon: 'error',
           duration: 2000
         })
       }
@@ -547,10 +666,13 @@ const navigateToHospitalDetail = (hospital: Hospital) => {
     console.error('跳转异常:', error)
     uni.showToast({
       title: '页面跳转异常',
-      icon: 'none'
+      icon: 'error',
+      duration: 2000
     })
   }
 }
+// 添加防抖时间戳
+navigateToHospitalDetail.lastClickTime = 0
 
 // 跳转到专科详情页
 const navigateToSpecialtyDetail = (specialty: Specialty) => {
@@ -1134,6 +1256,11 @@ function onShow() {
       overflow: hidden;
       box-shadow: 0 2rpx 8rpx var(--shadow-color, rgba(0, 0, 0, 0.08));
       transition: background-color 0.3s ease, box-shadow 0.3s ease;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      position: relative;
+      z-index: 1;
       
       .hospital-image {
         position: relative;
