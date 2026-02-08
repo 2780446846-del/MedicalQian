@@ -3,7 +3,7 @@
     <!-- 摄像头预览区域 -->
     <view class="camera-wrapper">
       <!-- 视频预览 - 使用renderjs操作原生video -->
-      <view v-if="isLiving" class="video-container" :change:prop="renderScript.updateStream" :prop="streamData">
+      <view class="video-container" :change:prop="renderScript.updateStream" :prop="streamData">
         <!--视频显示在这里 -->
         <view id="videoWrapper" class="video-wrapper-inner"></view>
       </view>
@@ -60,7 +60,7 @@
       </view>
 
       <!-- 未开始直播 -->
-      <view v-else class="preview-container">
+      <view v-if="!isLiving" class="preview-container">
         <view class="preview-content">
           <text class="preview-icon">📹</text>
           <text class="preview-title">准备开始直播</text>
@@ -72,11 +72,7 @@
           </view>
         </view>
       </view>
-    </view>- isLiving：是否正在直播（true/false）
-    - viewerCount：观众数量
-    - recentMessages：最近的3条聊天消息
-    - videoWrapper：视频显示的容器
-
+    </view>
 
     <!-- 底部控制栏 -->
     <view class="bottom-bar">
@@ -112,23 +108,27 @@
 <script setup lang="ts">
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { WebRTCDoctor } from '@/utils/webrtc'
-import { WEBRTC_CONFIG } from '@/config/webrtc'
+import { ref, computed, onMounted, onUnmounted, getCurrentInstance } from 'vue'
+import { API_BASE_URL } from '@/utils/config.js'
 
-// 全局变量
+// 根据 API_BASE_URL 推导信令服务器地址
+const wsBase = (API_BASE_URL || 'http://localhost:3000/api')
+  .replace('/api', '')
+  .replace('http://', 'ws://')
+  .replace('https://', 'wss://')
+const signalServerUrl = wsBase + '/webrtc-signal'
+
+const iceServers = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' }
+]
 
 // 直播状态
 const isLiving = ref(false)
 const liveTitle = ref('')
 const devicePosition = ref('user') // user 前置, environment 后置
-const streamData = ref({ action: '', position: 'user' }) // 用于触发renderjs
-const hasMultipleCameras = ref(false) // 是否有多个摄像头
-let availableCameras = [] // 可用的摄像头列表
-
-// WebRTC 实例
-let webrtcDoctor = null
-let currentStream = null
+const streamData = ref({ action: '', position: 'user', _ts: 0 }) // 用于触发renderjs
+const hasMultipleCameras = ref(true) // 移动端默认有前后摄像头
 
 // 医生信息
 const doctorInfo = ref({
@@ -156,8 +156,6 @@ const recentMessages = computed(() => {
 const liveTime = ref('00:00')
 let liveStartTime = 0
 let liveTimer = null
-let viewerTimer = null
-let messageTimer = null
 let likeTimer = null
 
 // 格式化直播时长
@@ -174,6 +172,37 @@ const formatLiveTime = (seconds) => {
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
+const ensureMediaPermissions = async () => {
+  // #ifndef APP-PLUS
+  return true
+  // #endif
+
+  // #ifdef APP-PLUS
+  if (typeof plus === 'undefined' || !plus.android || typeof plus.android.requestPermissions !== 'function') {
+    return true
+  }
+
+  return new Promise((resolve, reject) => {
+    const permissions = ['android.permission.CAMERA', 'android.permission.RECORD_AUDIO']
+    plus.android.requestPermissions(
+      permissions,
+      (result) => {
+        const deniedAlways = result?.deniedAlways || []
+        const deniedPresent = result?.deniedPresent || []
+        if (deniedAlways.length > 0 || deniedPresent.length > 0) {
+          reject(new Error('请在系统设置中授予摄像头和麦克风权限'))
+        } else {
+          resolve(true)
+        }
+      },
+      (error) => {
+        reject(new Error(error?.message || '申请摄像头权限失败'))
+      }
+    )
+  })
+  // #endif
+}
+
 // 更新直播时长
 //通过定时器每秒更新一次直播时长，并调用formatLiveTime格式化后更新到页面变量
 const updateLiveTime = () => {
@@ -181,26 +210,6 @@ const updateLiveTime = () => {
     const elapsed = Math.floor((Date.now() - liveStartTime) / 1000)
     liveTime.value = formatLiveTime(elapsed)
   }, 1000)
-}
-
-// 检测可用的摄像头
-//调用浏览器API检测设备上的可用摄像头，并判断是否存在多个摄像头
-const detectCameras = async () => {
-  try {
-    // @ts-ignore
-    //enumerateDevices API 用于枚举音视频输入输出设备
-    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-      // @ts-ignore
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      availableCameras = devices.filter((device) => device.kind === 'videoinput')
-    // @ts-ignore
-    hasMultipleCameras.value = availableCameras.length > 1
-    // @ts-ignore
-    console.log('检测到摄像头数量:', availableCameras.length)
-    }
-  } catch (error) {
-    console.error('检测摄像头失败:', error)
-  }
 }
 
 // 开始直播
@@ -214,40 +223,60 @@ const startLive = async () => {
   }
 
   try {
-    // 检测摄像头
-    await detectCameras()
+    await ensureMediaPermissions()
 
-    // 显示加载提示
     uni.showLoading({
-      title: '正在获取摄像头...',
+      title: '正在启动直播...',
       mask: true
     })
 
-    // 1. 先触发renderjs获取摄像头（等待摄像头流准备好）
+    liveStartTime = 0 // 重置，用于超时检测
     isLiving.value = true
+
+    // 将所有配置传递给 renderjs，由 renderjs 完成：
+    // 1) getUserMedia 获取摄像头
+    // 2) 连接信令服务器
+    // 3) 创建直播间
+    // 4) 管理 PeerConnection
+    const roomId = 'room_' + Date.now()
+    const doctorId = 'doctor_' + Date.now()
+
     streamData.value = {
       action: 'start',
-      position: devicePosition.value
+      position: devicePosition.value,
+      roomId,
+      doctorId,
+      doctorName: doctorInfo.value.name,
+      title: liveTitle.value,
+      signalServer: signalServerUrl,
+      iceServers,
+      _ts: Date.now()
     }
 
-    // 注意：WebRTC 初始化将在 setWebRTCStream 中完成（摄像头流准备好后）
-    console.log('⏳ 等待摄像头流准备...')
+    console.log('⏳ 已发送启动指令给 renderjs，等待回调...')
+    console.log('📡 信令服务器:', signalServerUrl)
 
-    // 安全机制：10秒后如果还没有收到流，隐藏加载提示
+    // 安全超时：15秒后如果 loading 还在，强制关闭
     setTimeout(() => {
-      if (!currentStream) {
-        console.warn('⚠️ 10秒内未收到摄像头流，可能出现问题')
+      if (isLiving.value && liveStartTime === 0) {
+        console.warn('⚠️ 15秒超时：直播启动流程未完成')
         uni.hideLoading()
         uni.showModal({
-          title: '摄像头启动超时',
-          content: '请检查摄像头权限或刷新页面重试',
-          showCancel: false,
-          success: () => {
+          title: '启动超时',
+          content: '直播启动超时，请检查：\n1. 摄像头权限是否已授予\n2. 后端服务是否已启动\n3. 网络是否可达\n\n信令地址: ' + signalServerUrl,
+          showCancel: true,
+          cancelText: '取消',
+          confirmText: '重试',
+          success: (res) => {
             isLiving.value = false
+            streamData.value = { action: 'stop', _ts: Date.now() }
+            if (res.confirm) {
+              startLive()
+            }
           }
         })
       }
-    }, 10000)
+    }, 15000)
 
   } catch (error) {
     console.error('开始直播失败:', error)
@@ -269,21 +298,13 @@ const endLive = () => {
     cancelText: '继续',
     success: (res) => {
       if (res.confirm) {
-        // 停止摄像头
-        streamData.value = { action: 'stop', position: devicePosition.value }
-
-        // 关闭 WebRTC 连接
-        if (webrtcDoctor) {
-          webrtcDoctor.closeRoom()
-          webrtcDoctor = null
-        }
+        // 通知 renderjs 停止（会关闭 WebSocket、PeerConnection、摄像头）
+        streamData.value = { action: 'stop', _ts: Date.now() }
 
         isLiving.value = false
 
         // 清除定时器
         if (liveTimer) clearInterval(liveTimer)
-        if (viewerTimer) clearInterval(viewerTimer)
-        if (messageTimer) clearInterval(messageTimer)
         if (likeTimer) clearInterval(likeTimer)
 
         // 重置数据
@@ -315,174 +336,127 @@ const endLive = () => {
 }
 
 // 切换摄像头
-const switchCamera = async () => {
+const switchCamera = () => {
   if (!isLiving.value || !hasMultipleCameras.value) return
-
-  // 切换摄像头方向
   devicePosition.value = devicePosition.value === 'user' ? 'environment' : 'user'
-  streamData.value = { action: 'switch', position: devicePosition.value }
-
-  uni.showToast({
-    title: '摄像头已切换',
-    icon: 'none'
-  })
+  streamData.value = { action: 'switch', position: devicePosition.value, _ts: Date.now() }
+  uni.showToast({ title: '摄像头已切换', icon: 'none' })
 }
 
-// 接收来自 renderjs 的视频流（用于 WebRTC）
-const setWebRTCStream = (stream) => {
-  console.log('📹 收到来自 renderjs 的视频流:', stream)
-  console.log('视频轨道数:', stream.getVideoTracks().length)
-  console.log('音频轨道数:', stream.getAudioTracks().length)
-  console.log('流ID:', stream.id)
-  console.log('流是否活跃:', stream.active)
+// ===== renderjs 回调方法（通过 ownerInstance.callMethod 调用） =====
 
-  currentStream = stream
-
-  // 使用 Promise 处理异步逻辑，但函数本身不是 async
-  initWebRTCWithStream(stream).catch(error => {
-    console.error('❌ 初始化 WebRTC 失败:', error)
-    uni.hideLoading()
-    uni.showModal({
-      title: '无法启动直播',
-      content: error instanceof Error ? error.message : '初始化失败',
-      showCancel: false
-    })
-    // 失败时停止摄像头
-    isLiving.value = false
-    streamData.value = { action: 'stop', position: devicePosition.value }
-  })
-
-  return true // 返回值，让 renderjs 知道函数被调用了
+// renderjs 通知：摄像头流已就绪
+const onRenderStreamReady = () => {
+  console.log('✅ renderjs: 摄像头流已就绪')
 }
 
-// 使用流初始化 WebRTC（独立的异步函数）
-const initWebRTCWithStream = async (stream) => {
-  console.log('🚀 开始初始化 WebRTC...')
-
-  // 1. 初始化 WebRTC
-  webrtcDoctor = new WebRTCDoctor()
-
-  // 2. 立即设置本地流（在创建直播间之前！）
-  webrtcDoctor.setLocalStream(stream)
-  console.log('✅ 本地流已设置到 WebRTC')
-
-  // 3. 设置回调
-  webrtcDoctor.onRoomCreated = (roomId) => {
-    console.log('✅ 直播间创建成功:', roomId)
-    uni.hideLoading()
-    uni.showToast({
-      title: '直播已开始',
-      icon: 'success'
-    })
-  }
-
-  webrtcDoctor.onViewerJoined = (viewerId, viewerName, count) => {
-    console.log('👤 观众加入:', viewerName)
-    viewerCount.value = count
-    messages.value.push({
-      id: messageId++,
-      type: 'system',
-      content: `${viewerName} 加入了直播间`
-    })
-  }
-
-  webrtcDoctor.onViewerLeft = (viewerId, viewerName, count) => {
-    console.log('👋 观众离开:', viewerName)
-    viewerCount.value = count
-    messages.value.push({
-      id: messageId++,
-      type: 'system',
-      content: `${viewerName} 离开了直播间`
-    })
-  }
-
-  webrtcDoctor.onError = (error) => {
-    console.error('❌ WebRTC 错误:', error)
-    uni.showToast({
-      title: error,
-      icon: 'none'
-    })
-  }
-
-  webrtcDoctor.onChatMessage = (senderId, senderName, message, timestamp) => {
-    console.log('💬 收到聊天消息:', senderName, message)
-    messages.value.push({
-      id: messageId++,
-      username: senderName,
-      content: message,
-      timestamp
-    })
-  }
-
-  // 4. 连接信令服务器
-  console.log('🔌 连接信令服务器...')
-  await webrtcDoctor.connect(WEBRTC_CONFIG.SIGNAL_SERVER)
-
-  // 5. 创建直播间（现在本地流已经准备好了）
-  const roomId = 'room_' + Date.now()
-  const doctorId = 'doctor_' + Date.now()
-  console.log('🏠 创建直播间:', roomId)
-  await webrtcDoctor.createRoom(roomId, doctorId, doctorInfo.value.name, liveTitle.value)
-
-  // 6. 开始计时
+// renderjs 通知：直播间已创建
+const onRenderRoomCreated = (data) => {
+  const info = typeof data === 'string' ? JSON.parse(data) : data
+  console.log('✅ 直播间创建成功:', info.roomId)
+  uni.hideLoading()
+  uni.showToast({ title: '直播已开始', icon: 'success' })
   liveStartTime = Date.now()
   updateLiveTime()
-  // startReceiveMessages() 
   startReceiveLikes()
-
-  console.log('🎉 直播启动完成！本地流已准备好，观众可以正常观看了')
 }
 
-// 将方法挂载到全局，让 renderjs 可以访问
-// @ts-ignore
-if (typeof window !== 'undefined') {
-  // @ts-ignore
-  window.__setWebRTCStream = setWebRTCStream
-  console.log('✅ setWebRTCStream 已挂载到 window')
+// renderjs 通知：观众加入
+const onRenderViewerJoined = (data) => {
+  const info = typeof data === 'string' ? JSON.parse(data) : data
+  console.log('👤 观众加入:', info.viewerName)
+  viewerCount.value = info.viewerCount || 0
+  messages.value.push({
+    id: messageId++,
+    type: 'system',
+    content: `${info.viewerName} 加入了直播间`
+  })
 }
 
-// 模拟观看人数变化（WebRTC模式下不需要，真实人数来自信令服务器）
-// const startViewerCountAnimation = () => {
-//   viewerCount.value = Math.floor(Math.random() * 50) + 10
-//   viewerTimer = setInterval(() => {
-//     const change = Math.floor(Math.random() * 8) - 2
-//     viewerCount.value = Math.max(5, viewerCount.value + change)
-//   }, 3000)
-// }
+// renderjs 通知：观众离开
+const onRenderViewerLeft = (data) => {
+  const info = typeof data === 'string' ? JSON.parse(data) : data
+  console.log('👋 观众离开:', info.viewerName)
+  viewerCount.value = info.viewerCount || 0
+  messages.value.push({
+    id: messageId++,
+    type: 'system',
+    content: `${info.viewerName} 离开了直播间`
+  })
+}
 
-// 模拟接收消息
-const startReceiveMessages = () => {
-  const usernames = ['患者A', '患者B', '患者C', '健康达人', '医学爱好者', '张先生', '李女士', '王阿姨']
-  const contents = [
-    '医生讲得真好！',
-    '学到了很多知识',
-    '感谢医生的分享',
-    '请问可以咨询一下吗？',
-    '这个直播太有用了',
-    '医生辛苦了',
-    '点赞支持！',
-    '收藏了',
-    '讲得很专业',
-    '通俗易懂'
-  ]
+// renderjs 通知：收到聊天消息
+const onRenderChatMessage = (data) => {
+  const info = typeof data === 'string' ? JSON.parse(data) : data
+  messages.value.push({
+    id: messageId++,
+    username: info.senderName,
+    content: info.message,
+    timestamp: info.timestamp
+  })
+}
 
-  messageTimer = setInterval(() => {
-    if (Math.random() > 0.3) {
-      const newMessage = {
-        id: messageId++,
-        // @ts-ignore
-        username: usernames[Math.floor(Math.random() * usernames.length)],
-        // @ts-ignore
-        content: contents[Math.floor(Math.random() * contents.length)]
-      }
-      messages.value.push(newMessage)
-
-      // 限制消息数量
-      if (messages.value.length > 100) {
-        messages.value.shift()
+// renderjs 通知：发生错误
+const onRenderError = (data) => {
+  const msg = typeof data === 'string' ? data : (data?.message || '直播出错')
+  console.error('❌ renderjs 错误:', msg)
+  uni.hideLoading()
+  uni.showModal({
+    title: '直播错误',
+    content: msg,
+    showCancel: false,
+    success: () => {
+      if (isLiving.value) {
+        isLiving.value = false
+        streamData.value = { action: 'stop', _ts: Date.now() }
       }
     }
-  }, 4000)
+  })
+}
+
+// renderjs 通知：摄像头访问失败
+const onRenderCameraError = (data) => {
+  const msg = typeof data === 'string' ? data : (data?.message || '摄像头访问失败')
+  console.error('❌ 摄像头错误:', msg)
+  uni.hideLoading()
+  isLiving.value = false
+  uni.showModal({
+    title: '无法启动摄像头',
+    content: msg,
+    showCancel: false
+  })
+}
+
+// 暴露回调方法给 renderjs 的 ownerInstance.callMethod
+defineExpose({
+  onRenderStreamReady,
+  onRenderRoomCreated,
+  onRenderViewerJoined,
+  onRenderViewerLeft,
+  onRenderChatMessage,
+  onRenderError,
+  onRenderCameraError
+})
+
+// 手动挂载到组件实例上，确保 renderjs callMethod 能找到
+const inst = getCurrentInstance()
+if (inst) {
+  const bindTarget = inst.proxy || inst
+  // @ts-ignore
+  bindTarget.onRenderStreamReady = onRenderStreamReady
+  // @ts-ignore
+  bindTarget.onRenderRoomCreated = onRenderRoomCreated
+  // @ts-ignore
+  bindTarget.onRenderViewerJoined = onRenderViewerJoined
+  // @ts-ignore
+  bindTarget.onRenderViewerLeft = onRenderViewerLeft
+  // @ts-ignore
+  bindTarget.onRenderChatMessage = onRenderChatMessage
+  // @ts-ignore
+  bindTarget.onRenderError = onRenderError
+  // @ts-ignore
+  bindTarget.onRenderCameraError = onRenderCameraError
+  console.log('✅ 回调方法已挂载到组件实例')
 }
 
 // 模拟点赞增长
@@ -495,182 +469,476 @@ const startReceiveLikes = () => {
 }
 
 onMounted(() => {
-  console.log('直播页面已加载')
+  console.log('直播页面已加载, 信令地址:', signalServerUrl)
 
-  // 监听来自 renderjs 的视频流事件
-uni.$on('webrtc-stream-ready', (stream) => {
-    console.log('📹 通过事件接收到视频流')
-    setWebRTCStream(stream)
-  })
+  // 备用通信：监听 renderjs 通过 uni.$emit 发来的事件
+  uni.$on('render-onRenderStreamReady', onRenderStreamReady)
+  uni.$on('render-onRenderRoomCreated', onRenderRoomCreated)
+  uni.$on('render-onRenderViewerJoined', onRenderViewerJoined)
+  uni.$on('render-onRenderViewerLeft', onRenderViewerLeft)
+  uni.$on('render-onRenderChatMessage', onRenderChatMessage)
+  uni.$on('render-onRenderError', onRenderError)
+  uni.$on('render-onRenderCameraError', onRenderCameraError)
 })
 
 onUnmounted(() => {
   // 移除事件监听
-  uni.$off('webrtc-stream-ready')
+  uni.$off('render-onRenderStreamReady')
+  uni.$off('render-onRenderRoomCreated')
+  uni.$off('render-onRenderViewerJoined')
+  uni.$off('render-onRenderViewerLeft')
+  uni.$off('render-onRenderChatMessage')
+  uni.$off('render-onRenderError')
+  uni.$off('render-onRenderCameraError')
 
-  // 停止摄像头
-  streamData.value = { action: 'stop', position: devicePosition.value }
+  // 通知 renderjs 停止所有资源
+  streamData.value = { action: 'stop', _ts: Date.now() }
 
-  // 关闭 WebRTC 连接
-  if (webrtcDoctor) {
-    webrtcDoctor.closeRoom()
-    webrtcDoctor = null
-  }
-
-  // 清除所有定时器
+  // 清除定时器
   if (liveTimer) clearInterval(liveTimer)
-  if (viewerTimer) clearInterval(viewerTimer)
-  if (messageTimer) clearInterval(messageTimer)
   if (likeTimer) clearInterval(likeTimer)
 })
 </script>
 
 <script module="renderScript" lang="renderjs">
+// ===== renderjs：所有 WebRTC 逻辑在视图层执行 =====
+// MediaStream 不离开此层，避免 APP-PLUS 序列化失败
 let mediaStream = null
 let videoElement = null
-let webrtcDoctorInstance = null
+let ws = null
+let peerConnections = {}
+let localStream = null
+let currentRoomId = ''
+let currentDoctorId = ''
+let currentDoctorName = ''
+let iceServersConfig = []
+let ownerInst = null
 
 export default {
   mounted() {
     console.log('renderjs mounted')
   },
   methods: {
+    // ===== 入口：逻辑层通过 prop 变化触发 =====
     async updateStream(newValue, oldValue, ownerInstance, instance) {
+      if (!newValue || !newValue.action) return
+      ownerInst = ownerInstance
       const action = newValue.action
-      const position = newValue.position
-      const roomId = newValue.roomId
-      
-      console.log('updateStream:', action, position)
-      
+      console.log('renderjs updateStream:', action)
+
       if (action === 'start') {
-        await this.startCamera(position, roomId, ownerInstance)
+        await this.startLive(newValue)
       } else if (action === 'switch') {
-        await this.switchCamera(position, ownerInstance)
+        await this.switchCamera(newValue.position)
       } else if (action === 'stop') {
-        this.stopCamera()
+        this.stopLive()
       }
     },
-    
-    async startCamera(position, roomId, ownerInstance) {
+
+    // ===== 启动直播：摄像头 + 信令 + 创建房间 =====
+    async startLive(config) {
       try {
-        console.log('🎬 renderjs: 开始启动摄像头...')
-        console.log('position:', position)
-        console.log('ownerInstance:', ownerInstance)
-        console.log('ownerInstance 类型:', typeof ownerInstance)
-        
-        // 获取摄像头权限
+        console.log('🎬 renderjs: 启动直播流程...')
+
+        // 保存配置
+        currentRoomId = config.roomId
+        currentDoctorId = config.doctorId
+        currentDoctorName = config.doctorName
+        iceServersConfig = config.iceServers || []
+
+        // 1) 获取摄像头
+        if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          this.callOwner('onRenderCameraError', '当前平台不支持摄像头采集')
+          return
+        }
+
         console.log('📸 请求摄像头权限...')
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: position,
+          video: {
+            facingMode: config.position || 'user',
             width: { ideal: 1280 },
             height: { ideal: 720 }
           },
           audio: true
         })
-        
+
         mediaStream = stream
-        
-        console.log('✅ 摄像头流已获取')
-        console.log('- 视频轨道数:', stream.getVideoTracks().length)
-        console.log('- 音频轨道数:', stream.getAudioTracks().length)
-        console.log('- 流ID:', stream.id)
-        console.log('- 流是否活跃:', stream.active)
-        
-        // 方法1: 尝试通过全局方法调用
-        console.log('🔄 准备调用 Vue 方法...')
-        if (typeof window.__setWebRTCStream === 'function') {
-          try {
-            console.log('🔄 尝试全局方法 window.__setWebRTCStream...')
-            const result = window.__setWebRTCStream(stream)
-            console.log('✅ 全局方法调用完成，返回值:', result)
-          } catch (err) {
-            console.error('❌ 全局方法调用失败:', err)
-            console.error('错误堆栈:', err.stack)
-          }
-        } else if (ownerInstance && typeof ownerInstance.callMethod === 'function') {
-          try {
-            console.log('🔄 尝试 callMethod...')
-            const result = ownerInstance.callMethod('setWebRTCStream', stream)
-            console.log('✅ callMethod 调用完成，返回值:', result)
-          } catch (err) {
-            console.error('❌ callMethod 失败:', err)
-            console.error('错误堆栈:', err.stack)
-          }
-        }
-        
-        // 方法2: 同时使用事件作为备用
-        console.log('🔄 同时发送事件...')
-        uni.$emit('webrtc-stream-ready', stream)
-        console.log('✅ 事件已发送')
-        
-        // 创建video元素显示本地预览
-        const wrapper = document.getElementById('videoWrapper')
-        if (wrapper) {
-          console.log('📺 创建本地预览视频元素')
-          wrapper.innerHTML = ''
-          videoElement = document.createElement('video')
-          videoElement.setAttribute('autoplay', 'true')
-          videoElement.setAttribute('playsinline', 'true')
-          videoElement.setAttribute('muted', 'true')
-          videoElement.style.width = '100%'
-          videoElement.style.height = '100%'
-          videoElement.style.objectFit = 'cover'
-          videoElement.style.transform = 'scaleX(-1)'
-          videoElement.style.background = '#000'
-          
-          // 先添加到 DOM
-          wrapper.appendChild(videoElement)
-          
-          // 再设置流
-          videoElement.srcObject = stream
-          
-          // 等待一小段时间确保流已加载
-          setTimeout(async () => {
-            try {
-              await videoElement.play()
-              console.log('✅ 本地预览已显示')
-            } catch (err) {
-              console.error('❌ 播放失败:', err)
-            }
-          }, 100)
-        } else {
-          console.error('❌ 找不到 videoWrapper 元素')
-        }
+        localStream = stream
+        console.log('✅ 摄像头流已获取, 视频轨道:', stream.getVideoTracks().length, '音频轨道:', stream.getAudioTracks().length)
+
+        // 通知逻辑层
+        this.callOwner('onRenderStreamReady')
+
+        // 2) 显示本地预览
+        this.showLocalPreview(stream)
+
+        // 3) 连接信令服务器
+        await this.connectSignalServer(config.signalServer)
+
+        // 4) 创建直播间
+        this.sendSignal({
+          type: 'create-room',
+          roomId: config.roomId,
+          doctorId: config.doctorId,
+          doctorName: config.doctorName,
+          title: config.title
+        })
+        console.log('� 已发送创建直播间请求:', config.roomId)
+
       } catch (error) {
-        console.error('❌ 启动摄像头失败:', error)
-        console.error('错误详情:', error.message, error.name)
-        uni.showToast({
-          title: '无法访问摄像头: ' + error.message,
-          icon: 'none'
-        })
+        console.error('❌ 启动直播失败:', error)
+        var errMsg = (error && error.message) ? error.message + '，请确认摄像头未被占用并已授予权限' : '摄像头访问失败'
+        this.callOwner('onRenderCameraError', errMsg)
       }
     },
-    
-    async switchCamera(position, ownerInstance) {
-      this.stopCamera()
-      await this.startCamera(position, null, ownerInstance)
+
+    // ===== 本地视频预览 =====
+    showLocalPreview(stream) {
+      const wrapper = document.getElementById('videoWrapper')
+      if (!wrapper) {
+        console.error('❌ 找不到 videoWrapper')
+        return
+      }
+
+      wrapper.innerHTML = ''
+      videoElement = document.createElement('video')
+      videoElement.setAttribute('autoplay', 'true')
+      videoElement.setAttribute('playsinline', 'true')
+      videoElement.setAttribute('muted', 'true')
+      videoElement.muted = true
+      videoElement.style.width = '100%'
+      videoElement.style.height = '100%'
+      videoElement.style.objectFit = 'cover'
+      videoElement.style.transform = 'scaleX(-1)'
+      videoElement.style.background = '#000'
+
+      wrapper.appendChild(videoElement)
+      videoElement.srcObject = stream
+
+      setTimeout(function () {
+        if (videoElement) {
+          videoElement.play().then(function () {
+            console.log('✅ 本地预览已显示')
+          }).catch(function (err) {
+            console.error('❌ 播放失败:', err)
+          })
+        }
+      }, 100)
     },
-    
-    stopCamera() {
+
+    // ===== WebSocket 信令连接 =====
+    connectSignalServer(signalServer) {
+      var self = this
+      return new Promise(function (resolve, reject) {
+        try {
+          if (ws) {
+            ws.close()
+            ws = null
+          }
+          console.log('� 连接信令服务器:', signalServer)
+          ws = new WebSocket(signalServer)
+
+          ws.onopen = function () {
+            console.log('✅ 信令服务器连接成功')
+            setTimeout(function () { resolve() }, 100)
+          }
+
+          ws.onerror = function (error) {
+            console.error('❌ 信令服务器连接失败:', error)
+            reject(new Error('信令服务器连接失败，请检查网络'))
+          }
+
+          ws.onmessage = function (event) {
+            try {
+              self.handleSignalMessage(JSON.parse(event.data))
+            } catch (e) {
+              console.error('解析信令消息失败:', e)
+            }
+          }
+
+          ws.onclose = function (event) {
+            console.log('信令服务器连接已关闭, code:', event.code)
+          }
+        } catch (error) {
+          reject(error)
+        }
+      })
+    },
+
+    // ===== 发送信令消息 =====
+    sendSignal(data) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(data))
+      } else {
+        console.error('WebSocket 未就绪，无法发送:', data.type)
+      }
+    },
+
+    // ===== 处理信令消息 =====
+    handleSignalMessage(data) {
+      console.log('收到信令消息:', data.type)
+
+      switch (data.type) {
+        case 'room-created':
+          console.log('✅ 直播间创建成功:', data.roomId)
+          this.callOwner('onRenderRoomCreated', JSON.stringify({ roomId: data.roomId }))
+          break
+
+        case 'viewer-joined':
+          console.log('👤 观众加入:', data.viewerName)
+          this.handleViewerJoined(data.viewerId, data.viewerName)
+          this.callOwner('onRenderViewerJoined', JSON.stringify({
+            viewerId: data.viewerId,
+            viewerName: data.viewerName,
+            viewerCount: data.viewerCount
+          }))
+          break
+
+        case 'viewer-left':
+          console.log('� 观众离开:', data.viewerName)
+          this.closePeerConnection(data.viewerId)
+          this.callOwner('onRenderViewerLeft', JSON.stringify({
+            viewerId: data.viewerId,
+            viewerName: data.viewerName,
+            viewerCount: data.viewerCount
+          }))
+          break
+
+        case 'answer':
+          this.handleAnswer(data.viewerId, data.answer)
+          break
+
+        case 'ice-candidate':
+          this.handleIceCandidate(data.viewerId, data.candidate)
+          break
+
+        case 'chat-message':
+          this.callOwner('onRenderChatMessage', JSON.stringify({
+            senderId: data.senderId,
+            senderName: data.senderName,
+            message: data.message,
+            timestamp: data.timestamp
+          }))
+          break
+
+        case 'error':
+          console.error('信令错误:', data.message)
+          this.callOwner('onRenderError', data.message)
+          break
+      }
+    },
+
+    // ===== PeerConnection：为观众创建连接并推流 =====
+    async handleViewerJoined(viewerId, viewerName) {
+      try {
+        if (!localStream) {
+          console.error('本地流不存在，无法为观众创建连接')
+          return
+        }
+
+        var pc = new RTCPeerConnection({ iceServers: iceServersConfig })
+
+        // 添加本地音视频轨道
+        localStream.getTracks().forEach(function (track) {
+          console.log('添加轨道:', track.kind, 'enabled:', track.enabled)
+          pc.addTrack(track, localStream)
+        })
+
+        // ICE 候选
+        var self = this
+        pc.onicecandidate = function (event) {
+          if (event.candidate) {
+            self.sendSignal({
+              type: 'ice-candidate',
+              roomId: currentRoomId,
+              targetId: viewerId,
+              candidate: event.candidate
+            })
+          }
+        }
+
+        // 连接状态监听
+        pc.onconnectionstatechange = function () {
+          console.log('连接状态 [' + viewerId + ']:', pc.connectionState)
+          if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+            self.closePeerConnection(viewerId)
+          }
+        }
+
+        // 创建 Offer
+        var offer = await pc.createOffer({
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: false
+        })
+        await pc.setLocalDescription(offer)
+
+        // 发送 Offer
+        this.sendSignal({
+          type: 'offer',
+          roomId: currentRoomId,
+          viewerId: viewerId,
+          offer: pc.localDescription
+        })
+
+        peerConnections[viewerId] = pc
+        console.log('✅ 为观众 ' + viewerId + ' 创建了 PeerConnection')
+      } catch (error) {
+        console.error('处理观众加入失败:', error)
+      }
+    },
+
+    // ===== 处理 Answer =====
+    async handleAnswer(viewerId, answer) {
+      var pc = peerConnections[viewerId]
+      if (pc) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer))
+          console.log('设置 Answer 成功 [' + viewerId + ']')
+        } catch (error) {
+          console.error('设置 Answer 失败:', error)
+        }
+      }
+    },
+
+    // ===== 处理 ICE Candidate =====
+    async handleIceCandidate(viewerId, candidate) {
+      var pc = peerConnections[viewerId]
+      if (pc) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        } catch (error) {
+          console.error('添加 ICE Candidate 失败:', error)
+        }
+      }
+    },
+
+    // ===== 关闭单个 PeerConnection =====
+    closePeerConnection(viewerId) {
+      var pc = peerConnections[viewerId]
+      if (pc) {
+        pc.close()
+        delete peerConnections[viewerId]
+        console.log('🔌 关闭了与观众 ' + viewerId + ' 的连接')
+      }
+    },
+
+    // ===== 切换摄像头 =====
+    async switchCamera(position) {
       if (mediaStream) {
-        mediaStream.getTracks().forEach(track => {
-          track.stop()
-        })
-        mediaStream = null
+        mediaStream.getTracks().forEach(function (track) { track.stop() })
       }
-      
+
+      try {
+        var stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: position, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: true
+        })
+
+        mediaStream = stream
+        localStream = stream
+
+        // 更新预览
+        if (videoElement) {
+          videoElement.srcObject = stream
+        }
+
+        // 替换所有 PeerConnection 中的轨道
+        var viewerIds = Object.keys(peerConnections)
+        for (var i = 0; i < viewerIds.length; i++) {
+          var pc = peerConnections[viewerIds[i]]
+          var senders = pc.getSenders()
+          var tracks = stream.getTracks()
+          for (var j = 0; j < tracks.length; j++) {
+            for (var k = 0; k < senders.length; k++) {
+              if (senders[k].track && senders[k].track.kind === tracks[j].kind) {
+                senders[k].replaceTrack(tracks[j])
+              }
+            }
+          }
+        }
+
+        console.log('✅ 摄像头已切换到:', position)
+      } catch (error) {
+        console.error('切换摄像头失败:', error)
+      }
+    },
+
+    // ===== 停止直播：清理所有资源 =====
+    stopLive() {
+      // 关闭直播间
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'close-room', roomId: currentRoomId }))
+        } catch (e) { /* ignore */ }
+      }
+
+      // 关闭所有 PeerConnection
+      var viewerIds = Object.keys(peerConnections)
+      for (var i = 0; i < viewerIds.length; i++) {
+        try { peerConnections[viewerIds[i]].close() } catch (e) { /* ignore */ }
+      }
+      peerConnections = {}
+
+      // 关闭 WebSocket
+      if (ws) {
+        try { ws.close() } catch (e) { /* ignore */ }
+        ws = null
+      }
+
+      // 停止摄像头
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(function (track) { track.stop() })
+        mediaStream = null
+        localStream = null
+      }
+
+      // 清理视频元素
       if (videoElement) {
         videoElement.srcObject = null
         videoElement = null
       }
-      
-      const wrapper = document.getElementById('videoWrapper')
+      var wrapper = document.getElementById('videoWrapper')
       if (wrapper) {
         wrapper.innerHTML = ''
       }
-      
-      console.log('摄像头已停止')
+
+      currentRoomId = ''
+      currentDoctorId = ''
+      currentDoctorName = ''
+      console.log('🔴 直播已停止，所有资源已清理')
+    },
+
+    // ===== 安全地调用逻辑层方法 =====
+    callOwner(methodName, data) {
+      console.log('📤 callOwner:', methodName)
+      var called = false
+
+      // 方法1: ownerInstance.callMethod
+      if (ownerInst && typeof ownerInst.callMethod === 'function') {
+        try {
+          ownerInst.callMethod(methodName, data)
+          called = true
+          console.log('✅ callMethod 成功:', methodName)
+        } catch (e) {
+          console.error('❌ callMethod(' + methodName + ') 失败:', e)
+        }
+      }
+
+      // 方法2: uni.$emit 事件作为备用（确保逻辑层能收到）
+      if (typeof uni !== 'undefined' && typeof uni.$emit === 'function') {
+        try {
+          uni.$emit('render-' + methodName, data)
+          if (!called) {
+            console.log('✅ uni.$emit 备用成功:', 'render-' + methodName)
+          }
+        } catch (e) {
+          console.error('❌ uni.$emit 失败:', e)
+        }
+      }
+
+      if (!called) {
+        console.warn('⚠️ ownerInstance 不可用，仅通过 uni.$emit 通知:', methodName)
+      }
     }
   }
 }

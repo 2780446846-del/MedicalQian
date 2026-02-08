@@ -1,131 +1,245 @@
 import { request } from '@/utils/request.js'
 import { ONECLICK_CONFIG } from './oneclick.config.js'
 
-let sdkLoadingPromise
+const isPlainObject = (val) => Object.prototype.toString.call(val) === '[object Object]'
 
-const ensureSdk = () => {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('H5 环境不可用'))
-  }
-  if (window.PhoneNumberServer) {
-    return Promise.resolve()
-  }
-  if (sdkLoadingPromise) {
-    return sdkLoadingPromise
-  }
-  sdkLoadingPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = '/static/numberAuth-web-sdk.js'
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error('一键登录脚本加载失败'))
-    document.body.appendChild(script)
+const deepMerge = (target = {}, source = {}) => {
+  const output = { ...target }
+  Object.keys(source || {}).forEach((key) => {
+    const sourceVal = source[key]
+    if (isPlainObject(sourceVal)) {
+      output[key] = deepMerge(isPlainObject(output[key]) ? output[key] : {}, sourceVal)
+    } else {
+      output[key] = sourceVal
+    }
   })
-  return sdkLoadingPromise
+  return output
 }
 
-const normalizePageUrl = (raw) => {
-  if (!raw) return ''
-  return raw.endsWith('/') ? raw : `${raw}/`
+const closeAuthViewSafely = () => {
+  try {
+    if (typeof uni !== 'undefined' && typeof uni.closeAuthView === 'function') {
+      uni.closeAuthView()
+    }
+  } catch (error) {
+    console.warn('[oneclick] closeAuthView failed', error)
+  }
 }
 
-export const startOneClickLogin = async ({ authPageOption, onStatus, schemeCode, pageUrl, origin, businessType } = {}) => {
-  await ensureSdk()
-
-  const runtimeOrigin = typeof window !== 'undefined' && window.location ? window.location.origin : ''
-  const resolvedScheme = schemeCode || ONECLICK_CONFIG.schemeCode
-  const resolvedOrigin = origin || ONECLICK_CONFIG.origin || runtimeOrigin
-  const resolvedPageUrl = normalizePageUrl(pageUrl || ONECLICK_CONFIG.pageUrl || runtimeOrigin)
-  const resolvedBizType = businessType ?? ONECLICK_CONFIG.businessType ?? 1
-
-  const authResp = await request({
-    url: '/number-auth/getAuth',
+const requestLoginByPhone = async (phone) => {
+  console.log('[oneclick] requesting backend /login/onekey with phone:', phone)
+  const loginResp = await request({
+    url: '/login/onekey',
     method: 'POST',
-    data: {
-      schemeCode: resolvedScheme,
-      pageUrl: resolvedPageUrl,
-      origin: resolvedOrigin,
-      bizType: resolvedBizType,
-    },
+    data: { phone },
     needAuth: false,
     showLoading: false,
     showError: false,
   })
 
-  const authData = authResp?.data || authResp
-  const accessToken = authData?.accessToken || authData?.tokenInfo?.accessToken
-  const jwtToken = authData?.jwtToken || authData?.tokenInfo?.jwtToken
-  if (!accessToken || !jwtToken) {
-    throw new Error(authResp?.msg || '获取鉴权 Token 失败')
+  const token =
+    loginResp?.token ||
+    loginResp?.data?.token ||
+    loginResp?.result?.token ||
+    loginResp?.raw?.token
+
+  const inferredData =
+    (isPlainObject(loginResp?.data) && loginResp.data) ||
+    (isPlainObject(loginResp?.result) && loginResp.result) ||
+    loginResp?.user ||
+    loginResp?.profile ||
+    loginResp
+
+  const normalized = {
+    success: loginResp?.success ?? loginResp?.code === 0 ?? loginResp?.status === 'ok',
+    token,
+    data: inferredData,
+    message: loginResp?.message || loginResp?.msg || loginResp?.errorMsg || loginResp?.error,
+    raw: loginResp,
   }
 
-  const server = new window.PhoneNumberServer()
+  console.log('[oneclick] backend /login/onekey response:', normalized)
+  return normalized
+}
 
-  return new Promise((resolve, reject) => {
-    const closeLoginPage = () => {
-      try {
-        server.closeLoginPage && server.closeLoginPage()
-      } catch (e) {
-        console.warn('closeLoginPage failed', e)
-      }
-    }
-
-    const fail = (err) => {
-      closeLoginPage()
-      reject(err instanceof Error ? err : new Error(err?.message || err?.msg || '一键登录失败'))
-    }
-
-    server.checkLoginAvailable({
-      accessToken,
-      jwtToken,
-      success: () => {
-        server.getLoginToken({
-          authPageOption,
-          success: async (sdkRes) => {
-            if (String(sdkRes?.code) !== '600000' || !sdkRes?.spToken) {
-              return fail(new Error(sdkRes?.msg || '一键登录失败'))
-            }
-
-            try {
-              const phoneResp = await request({
-                url: '/number-auth/getPhone',
-                method: 'POST',
-                data: { spToken: sdkRes.spToken },
-                needAuth: false,
-                showLoading: false,
-                showError: false,
-              })
-
-              const phoneData = phoneResp?.data || phoneResp
-              const phone = phoneData?.phone
-              if (!phone) {
-                throw new Error(phoneResp?.msg || '未获取到手机号')
-              }
-
-              const loginResp = await request({
-                url: '/login/onekey',
-                method: 'POST',
-                data: { phone },
-                needAuth: false,
-                showLoading: false,
-                showError: false,
-              })
-
-              closeLoginPage()
-              resolve({
-                success: loginResp?.success ?? loginResp?.code === 0,
-                token: loginResp?.token,
-                data: loginResp?.data,
-                raw: loginResp,
-              })
-            } catch (error) {
-              fail(error)
-            }
-          },
-          error: (err) => fail(new Error(err?.msg || '一键登录失败')),
-          watch: typeof onStatus === 'function' ? onStatus : undefined,
-        })
+// #ifdef APP-PLUS
+const preLoginUniverify = () =>
+  new Promise((resolve, reject) => {
+    uni.preLogin({
+      provider: 'univerify',
+      success: resolve,
+      fail: (err) => {
+        console.warn('[oneclick] preLogin failed', err)
+        reject(err)
       },
-      error: (err) => fail(new Error(err?.msg || '鉴权失败')),
     })
   })
+
+const pickValidPhone = (...candidates) => {
+  return candidates.find((item) => {
+    if (!item) return false
+    if (typeof item === 'string' && item.trim()) return true
+    if (typeof item === 'number') return true
+    return false
+  })
+}
+
+const extractDirectPhone = (authResult = {}) =>
+  pickValidPhone(
+    authResult?.phoneNumber,
+    authResult?.phone,
+    authResult?.mobile,
+    authResult?.tel,
+    authResult?.data?.phoneNumber,
+    authResult?.data?.phone
+  )
+
+const getServerVerifyConfig = () => ONECLICK_CONFIG?.serverVerify || {}
+
+const shouldUseServerVerify = () => !!getServerVerifyConfig().enable
+
+const verifyThroughUniCloud = async (authResult) => {
+  const config = getServerVerifyConfig()
+  if (!config.functionName) {
+    throw new Error('未配置 serverVerify.functionName，无法调用 uniCloud 云函数')
+  }
+  if (typeof uniCloud === 'undefined' || typeof uniCloud.callFunction !== 'function') {
+    throw new Error('当前工程未启用 uniCloud，无法完成服务器校验')
+  }
+
+  const cloudRes = await uniCloud.callFunction({
+    name: config.functionName,
+    data: {
+      access_token: authResult?.access_token,
+      openid: authResult?.openid,
+      ...(config.extraData || {}),
+    },
+  })
+
+  const result = cloudRes?.result || {}
+  if (result.code !== 0 && result.errCode !== 0) {
+    throw new Error(result.message || '云函数返回失败')
+  }
+
+  return pickValidPhone(
+    result?.data?.phoneNumber,
+    result?.data?.data?.phoneNumber,
+    result?.data?.data?.data?.phoneNumber,
+    result?.phoneNumber
+  )
+}
+
+const verifyThroughHttp = async (authResult) => {
+  const config = getServerVerifyConfig()
+  const httpConfig = config.http || {}
+  if (!httpConfig.url) {
+    throw new Error('未配置 serverVerify.http.url，无法发起验证请求')
+  }
+
+  const [error, response] = await uni
+    .request({
+      url: httpConfig.url,
+      method: httpConfig.method || 'POST',
+      header: Object.assign({ 'content-type': 'application/json' }, httpConfig.headers || {}),
+      data: Object.assign(
+        {
+          access_token: authResult?.access_token,
+          openid: authResult?.openid,
+        },
+        httpConfig.extraData || {}
+      ),
+    })
+    .then((res) => [null, res])
+    .catch((err) => [err, null])
+
+  if (error) {
+    throw error
+  }
+
+  const { data } = response || {}
+  return pickValidPhone(
+    data?.phoneNumber,
+    data?.data?.phoneNumber,
+    data?.data?.data?.phoneNumber,
+    data?.result?.phoneNumber
+  )
+}
+
+const obtainPhoneNumber = async (authResult = {}) => {
+  if (!shouldUseServerVerify()) {
+    const phone = extractDirectPhone(authResult)
+    if (!phone) {
+      throw new Error(
+        '未从 DCloud univerify 返回手机号，请在控制台开启“直接返回手机号”或在 ONECLICK_CONFIG.serverVerify 中开启服务器校验'
+      )
+    }
+    return String(phone)
+  }
+
+  if (!authResult?.access_token || !authResult?.openid) {
+    throw new Error('运营商未返回 access_token/openid，无法通过云函数校验')
+  }
+
+  const cfg = getServerVerifyConfig()
+  const phone = cfg.type === 'http' ? await verifyThroughHttp(authResult) : await verifyThroughUniCloud(authResult)
+  if (!phone) {
+    throw new Error('服务器校验成功但未返回手机号，请检查云函数/接口的返回数据结构')
+  }
+  return String(phone)
+}
+
+const startAppPlusLogin = async ({ onStatus, univerifyStyle } = {}) => {
+  try {
+    await preLoginUniverify()
+  } catch (error) {
+    // 预登录失败时仍尝试拉起授权页
+  }
+
+  const defaultStyle = ONECLICK_CONFIG?.univerify || {}
+  const mergedStyle = deepMerge(defaultStyle, univerifyStyle || {})
+
+  return new Promise((resolve, reject) => {
+    uni.login({
+      provider: 'univerify',
+      univerifyStyle: mergedStyle,
+      success: async (res) => {
+        const authResult = res?.authResult || {}
+        if (typeof onStatus === 'function') {
+          try {
+            onStatus({ stage: 'univerify:success', payload: authResult })
+          } catch (cbErr) {
+            console.warn('[oneclick] onStatus error', cbErr)
+          }
+        }
+
+        try {
+          const phone = await obtainPhoneNumber(authResult)
+          console.log('[oneclick] obtained phone from univerify/server:', phone)
+
+          const loginResult = await requestLoginByPhone(phone)
+          if (!loginResult?.success) {
+            throw new Error(loginResult?.message || '后台登录失败')
+          }
+          closeAuthViewSafely()
+          resolve(loginResult)
+        } catch (error) {
+          closeAuthViewSafely()
+          reject(error instanceof Error ? error : new Error(error?.msg || '一键登录失败'))
+        }
+      },
+      fail: (error) => {
+        closeAuthViewSafely()
+        reject(error instanceof Error ? error : new Error(error?.errMsg || '一键登录失败'))
+      },
+    })
+  })
+}
+// #endif
+
+export const startOneClickLogin = async (options = {}) => {
+  // #ifdef APP-PLUS
+  return startAppPlusLogin(options)
+  // #endif
+
+  throw new Error('当前环境暂不支持一键登录，请在 APP 内使用')
 }

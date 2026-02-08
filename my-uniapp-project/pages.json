@@ -26,7 +26,7 @@
     {
       "path": "pages/buy-medicine/index",
       "style": {
-        "navigationBarTitleText": "买药",
+        "navigationBarTitleText": "Buy Medicine",
         "backgroundColor": "#FFFFFF"
       }
     },
@@ -410,17 +410,12 @@
       }
     },
     {
-      "path": "pages/web-view/index",
+      "path": "pages/online-consult/trtc-call",
       "style": {
-        "navigationBarTitleText": "网页导航",
-        "backgroundColor": "#ffffff"
-      }
-    },
-    {
-      "path": "pages/location-demo/index",
-      "style": {
-        "navigationBarTitleText": "位置与导航演示",
-        "backgroundColor": "#ffffff"
+        "navigationBarTitleText": "视频通话",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#1a1a2e"
       }
     }
   ],
@@ -453,9 +448,9 @@
       },
       {
         "pagePath": "pages/buy-medicine/index",
-        "text": "买药",
-        "iconPath": "static/tabbar/买药.png",
-        "selectedIconPath": "static/tabbar/买药-选中.png"
+        "text": "Medicine",
+        "iconPath": "static/tabbar/medicine.png",
+        "selectedIconPath": "static/tabbar/medicine-active.png"
       },
       {
         "pagePath": "pages/yishuo/yishuo",

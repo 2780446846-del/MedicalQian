@@ -3,6 +3,7 @@
  */
 
 import { getUserInfo } from '@/utils/auth.js'
+import { debugLog, debugWarn } from '@/utils/logger.js'
 
 const STORAGE_KEY_PREFIX = 'consultation_records_'
 
@@ -12,7 +13,7 @@ const STORAGE_KEY_PREFIX = 'consultation_records_'
  */
 function getStorageKey(userId) {
   if (!userId) {
-    console.warn('⚠️ 用户ID为空，使用默认key（可能导致数据混乱）')
+    debugWarn('⚠️ 用户ID为空，使用默认key（可能导致数据混乱）')
     return 'consultation_records_default'
   }
   return `${STORAGE_KEY_PREFIX}${userId}`
@@ -30,7 +31,7 @@ export function getAllConsultations(userId = null) {
         const userInfo = getUserInfo()
         userId = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username
       } catch (e) {
-        console.warn('无法从auth获取用户ID:', e)
+        debugWarn('无法从auth获取用户ID:', e)
       }
     }
     
@@ -61,7 +62,7 @@ export function saveConsultation(consultationData, userId = null) {
           const userInfo = getUserInfo()
           userId = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username
         } catch (e) {
-          console.warn('无法从auth获取用户ID:', e)
+          debugWarn('无法从auth获取用户ID:', e)
         }
       }
     }
@@ -79,7 +80,7 @@ export function saveConsultation(consultationData, userId = null) {
     if (consultationData.id) {
       // 优先根据咨询ID查找
       existingIndex = records.findIndex(r => r.id === consultationData.id)
-      console.log('🔍 根据咨询ID查找:', consultationData.id, existingIndex >= 0 ? '找到' : '未找到')
+      debugLog('🔍 根据咨询ID查找:', consultationData.id, existingIndex >= 0 ? '找到' : '未找到')
     }
     
     // 如果根据ID没找到，则根据患者信息查找（优先根据患者ID，其次根据患者姓名、性别、年龄）
@@ -106,7 +107,7 @@ export function saveConsultation(consultationData, userId = null) {
         
         return false
       })
-      console.log('🔍 根据患者信息查找:', {
+      debugLog('🔍 根据患者信息查找:', {
         patientId: patientId,
         patientName: consultationData.patientInfo?.name,
         found: existingIndex >= 0 ? '找到' : '未找到'
@@ -162,6 +163,16 @@ export function saveConsultation(consultationData, userId = null) {
         }
       }
       
+      // 保留「最开始问诊时」的医生：合并时优先用 existing 的 doctorId/doctorInfo，避免被后续保存覆盖
+      const doctorIdKeep = existing.doctorId || consultationData.doctorId
+      const hasExistingDoctorInfo = existing.doctorInfo && (existing.doctorInfo.username || existing.doctorInfo.name)
+      const hasNewDoctorInfo = consultationData.doctorInfo && (consultationData.doctorInfo.username || consultationData.doctorInfo.name)
+      const doctorInfoKeep = hasExistingDoctorInfo
+        ? existing.doctorInfo
+        : hasNewDoctorInfo
+          ? consultationData.doctorInfo
+          : existing.doctorInfo || consultationData.doctorInfo // 兜底保留已有的
+
       // 更新现有记录（合并数据）
       records[existingIndex] = {
         ...existing,
@@ -176,10 +187,12 @@ export function saveConsultation(consultationData, userId = null) {
         patientInfo: {
           ...existing.patientInfo,
           ...consultationData.patientInfo
-        }
+        },
+        doctorId: doctorIdKeep,
+        doctorInfo: doctorInfoKeep
       }
       
-      console.log('✅ 咨询记录已合并:', existing.id, '消息数:', records[existingIndex].messages.length, '图片数:', records[existingIndex].symptomImages.length)
+      debugLog('✅ 咨询记录已合并:', existing.id, '消息数:', records[existingIndex].messages.length, '图片数:', records[existingIndex].symptomImages.length)
       return existing.id
     } else {
       // 创建新记录
@@ -199,7 +212,7 @@ export function saveConsultation(consultationData, userId = null) {
       // 添加新记录（插入到开头）
       records.unshift(consultationData)
       
-      console.log('✅ 咨询记录已创建:', consultationData.id)
+      debugLog('✅ 咨询记录已创建:', consultationData.id)
     }
     
     // 限制最多保存50条记录
@@ -209,11 +222,36 @@ export function saveConsultation(consultationData, userId = null) {
     
     // 保存到本地存储（使用用户特定的key）
     const storageKey = getStorageKey(userId)
-    uni.setStorageSync(storageKey, JSON.stringify(records))
+    debugLog('💾 保存到本地存储，存储key:', storageKey, '记录数:', records.length)
+    
+    try {
+      const recordsJson = JSON.stringify(records)
+      uni.setStorageSync(storageKey, recordsJson)
+      debugLog('✅ 本地存储写入成功，存储key:', storageKey, '数据大小:', recordsJson.length, '字节')
+      
+      // 验证保存是否成功
+      const verifyData = uni.getStorageSync(storageKey)
+      if (verifyData) {
+        const verifyRecords = JSON.parse(verifyData)
+        debugLog('✅ 本地存储验证成功，记录数:', verifyRecords.length, '消息总数:', 
+          verifyRecords.reduce((sum, r) => sum + (r.messages?.length || 0), 0))
+      } else {
+        debugWarn('⚠️ 本地存储验证失败：读取为空')
+      }
+    } catch (storageError) {
+      console.error('❌ 本地存储写入失败:', storageError)
+      console.error('存储错误详情:', {
+        message: storageError.message,
+        storageKey: storageKey,
+        recordsCount: records.length
+      })
+      throw storageError
+    }
     
     return consultationData.id || records[0].id
   } catch (error) {
     console.error('保存咨询记录失败:', error)
+    console.error('错误堆栈:', error.stack)
     throw error
   }
 }
@@ -244,7 +282,7 @@ export function deleteConsultation(consultationId, userId = null) {
     const filtered = records.filter(r => r.id !== consultationId)
     const storageKey = getStorageKey(userId)
     uni.setStorageSync(storageKey, JSON.stringify(filtered))
-    console.log('✅ 咨询记录已删除:', consultationId)
+    debugLog('✅ 咨询记录已删除:', consultationId)
     return true
   } catch (error) {
     console.error('删除咨询记录失败:', error)
@@ -264,13 +302,13 @@ export function clearAllConsultations(userId = null) {
         const userInfo = getUserInfo()
         userId = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username
       } catch (e) {
-        console.warn('无法从auth获取用户ID:', e)
+        debugWarn('无法从auth获取用户ID:', e)
       }
     }
     
     const storageKey = getStorageKey(userId)
     uni.removeStorageSync(storageKey)
-    console.log('✅ 咨询记录已清除（用户:', userId, '）')
+    debugLog('✅ 咨询记录已清除（用户:', userId, '）')
     return true
   } catch (error) {
     console.error('清除咨询记录失败:', error)

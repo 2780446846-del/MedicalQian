@@ -222,13 +222,23 @@ const submitConsult = async () => {
       console.warn('⚠️ 保存 patientId 到全局/本地失败:', e)
     }
     
-    // 1. 指定固定医生（qmp）接收当前咨询
-    // 说明：原逻辑是从 /chat/on-duty-doctors 获取在岗医生列表并取第一个。
-    // 现在按需求，强制将所有前台问诊固定分配给 qmp 账号。
-    // qmp 的医生ID（userId）为后端配置中的 '6954c80b51429de7970bc551'。
-    const doctorId = '6954c80b51429de7970bc551'
-    console.log('🔒 使用固定医生ID (qmp):', doctorId)
-    
+    // 1. 使用在岗医生（优先）或回退到固定 qmp；确保展示「真正在聊天的医生」
+    let doctorId = '6954c80b51429de7970bc551'
+    let doctorInfo: { username: string } = { username: 'qmp' }
+    try {
+      const r = await request({ url: '/chat/on-duty-doctors-with-info', method: 'GET', showLoading: false, showError: false })
+      if (r?.success && r?.data?.length) {
+        const first = r.data[0]
+        doctorId = first.id
+        doctorInfo = { username: first.username || '医生' }
+        console.log('✅ 使用在岗医生:', doctorId, doctorInfo.username)
+      } else {
+        console.log('🔒 无在岗医生，使用固定医生 (qmp):', doctorId)
+      }
+    } catch (e) {
+      console.warn('⚠️ 获取在岗医生失败，使用固定医生 (qmp):', e)
+    }
+
     // 2. 连接Socket.IO
     try {
       await connectSocket(patientId, {
@@ -294,11 +304,12 @@ const submitConsult = async () => {
         type: file.type || 'image'
       })),
       doctorId: doctorId,
+      doctorInfo: doctorInfo, // 医生端用户名，供患者端展示
       patientId: patientId,
       messages: [], // 初始消息会在聊天页面加载时从服务器获取
       hasVisited: hasVisited.value
     }
-    
+
     // 保存咨询记录到本地存储（会根据患者姓名自动合并或创建新记录）
     // 使用userId作为存储key，但使用patientId（基于患者姓名）作为患者标识
     const consultationId = saveConsultation(consultationData, userId)
@@ -359,6 +370,7 @@ const submitConsult = async () => {
         patient: selectedPatient,
         hasVisited: hasVisited.value,
         doctorId: doctorId,
+        doctorInfo: doctorInfo, // 医生端用户名，供聊天页头部与消息旁展示
         patientId: patientId,
         consultationId: consultationId
       }
