@@ -7,7 +7,7 @@
           <uni-icons type="left" size="20" color="#fff"></uni-icons>
         </view>
         <view class="header-center">
-          <text class="header-title">在线咨询中</text>
+          <text class="header-title">{{ doctorDisplayName }}</text>
           <text class="header-subtitle">咨询时间结束前可不限次数向医生提问</text>
         </view>
         <view class="header-time">
@@ -57,7 +57,10 @@
         class="message-wrapper"
         :class="msg.isMe ? 'patient-wrapper' : 'doctor-wrapper'"
       >
-        <view v-if="!msg.isMe" class="doctor-avatar">👨‍⚕️</view>
+        <view v-if="!msg.isMe" class="doctor-meta">
+          <view class="doctor-avatar">👨‍⚕️</view>
+          <text class="doctor-name">{{ doctorDisplayName }}</text>
+        </view>
         <view class="message-card" :class="msg.isMe ? 'patient-message' : 'doctor-card'">
           <view v-if="msg.type === 'text'" class="message-text">
             {{ msg.content }}
@@ -76,7 +79,11 @@
 
       <!-- 连接状态提示 -->
       <view v-if="!socketConnected" class="connection-status">
-        <text>正在连接...</text>
+        <text>Socket.IO 未连接</text>
+        <text class="connection-hint">请确保后端服务已启动（端口 3000）。真机请连与电脑同一 WiFi，用浏览器打开 http://电脑IP:5173</text>
+        <button class="reconnect-btn" :disabled="reconnecting" @click="retrySocketConnection">
+          {{ reconnecting ? '连接中...' : '重新连接' }}
+        </button>
       </view>
     </scroll-view>
 
@@ -177,10 +184,10 @@
       </view>
     </view>
 
-    <!-- 通话界面 -->
+    <!-- 通话界面：与医生端布局和样式保持一致，H5 下使用原生 video/audio 播放 WebRTC 媒体流 -->
     <view v-if="isInCall" class="call-modal">
       <view class="call-content">
-        <!-- 远程视频 -->
+        <!-- 远程视频（视频通话显示整屏画面） -->
         <video
           ref="remoteVideoRef"
           class="remote-video"
@@ -188,7 +195,7 @@
           playsinline
         ></video>
         
-        <!-- 本地视频（小窗口） -->
+        <!-- 本地视频（右上角小窗口） -->
         <video
           ref="localVideoRef"
           class="local-video"
@@ -223,8 +230,7 @@
 </template>
 
 <script setup lang="ts">
-// @ts-ignore
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import {
   connectSocket,
   disconnectSocket,
@@ -234,12 +240,13 @@ import {
   isSocketConnected as checkSocketConnected,
   onIncomingCall,
   offIncomingCall,
-  getSocketInstance
-} from '../../utils/socket'
-import { saveConsultation } from '../../utils/consultationStorage'
-import { getUserInfo } from '../../utils/auth'
-import request from '../../utils/request'
-import getCallManager from '../../utils/callManager'
+  getSocketInstance,
+  setOnSocketConnectCallback
+} from '@/utils/socket.js'
+import { saveConsultation } from '@/utils/consultationStorage.js'
+import { getUserInfo } from '@/utils/auth.js'
+import request from '@/utils/request.js'
+import getCallManager from '@/utils/callManager.js'
 
 interface PatientInfo {
   name: string
@@ -287,7 +294,33 @@ const currentVideoThumb = ref('')
 const messages = ref<ChatMessage[]>([])
 const scrollViewRef = ref<any>(null)
 const doctorId = ref('doctor_001') // 医生ID，实际应该从路由参数或全局数据获取
+const doctorInfo = ref<any>(null)
+
+const doctorDisplayName = computed(() => {
+  const info = doctorInfo.value || {}
+  const name =
+    info.username ||
+    info.name ||
+    info.nickname ||
+    info.realname ||
+    info.displayName
+  if (name) return name
+
+  const id = (doctorId.value || '').toString()
+  if (!id) return '医生'
+  if (id.startsWith('doctor_')) {
+    const raw = id.replace('doctor_', '')
+    if (raw && !/^\d+$/.test(raw)) return raw
+    return '医生'
+  }
+  // 禁止显示 raw 账号ID（如 MongoDB ObjectId 24 位十六进制），改为「医生」
+  if (/^[a-fA-F0-9]{24}$/.test(id)) return '医生'
+  return id
+})
 const socketConnected = ref(false)
+const reconnecting = ref(false)
+// Socket连接状态检查定时器
+let socketStatusCheckTimer: any = null
 // 存储当前患者ID（用于消息过滤）
 let currentPatientId: string | null = null
 // 存储当前咨询记录ID
@@ -305,9 +338,121 @@ const callType = ref('video') // 'audio' | 'video'
 const isMuted = ref(false)
 const isVideoEnabled = ref(true)
 const callStatusText = ref('')
-const localVideoRef = ref<any>(null)
-const remoteVideoRef = ref<any>(null)
+/** 原生 video/audio 元素（与医生端 ChatView 一致，用于 WebRTC 媒体播放） */
+const localVideoRef = ref<HTMLVideoElement | null>(null)
+const remoteVideoRef = ref<HTMLVideoElement | null>(null)
+const remoteAudioRef = ref<HTMLAudioElement | null>(null)
 let callManager: any = null
+
+/**
+ * 在 H5 环境下，用户点击“发起/接听语音通话”按钮之后，主动尝试播放远程音频，
+ * 尽量绕过浏览器对带声音媒体自动播放的限制。
+ */
+function ensureRemoteAudioPlayingOnH5() {
+  // #ifdef H5
+  const audioEl = remoteAudioRef.value
+  if (!audioEl) {
+    console.warn('⚠️ [患者端]ensureRemoteAudioPlayingOnH5: 当前不存在远程音频元素')
+    return
+  }
+  // 若元素已不在文档中（如通话已结束、组件已卸载），不调用 play，避免 AbortError
+  if (typeof document !== 'undefined' && !document.contains(audioEl)) {
+    return
+  }
+
+  try {
+    audioEl.muted = false
+    audioEl.volume = 1
+    const playResult = audioEl.play()
+    if (playResult && typeof (playResult as any).then === 'function') {
+      ;(playResult as Promise<void>)
+        .then(() => {
+          if (typeof document !== 'undefined' && document.contains(audioEl)) {
+            console.log('✅ [患者端]用户操作后主动播放远程音频成功')
+          }
+        })
+        .catch((err: any) => {
+          // 元素已被移除导致的 AbortError 不当作错误（如挂断、切页时正常）
+          const isAbortOrRemoved = err?.name === 'AbortError' || (typeof document !== 'undefined' && !document.contains(audioEl))
+          if (!isAbortOrRemoved) {
+            console.warn('⚠️ [患者端]用户操作后播放远程音频失败:', err)
+          }
+        })
+    }
+  } catch (error) {
+    console.error('❌ [患者端]ensureRemoteAudioPlayingOnH5 调用异常:', error)
+  }
+  // #endif
+}
+
+/** H5：获取或创建远程音频元素（语音通话播放对方声音） */
+function ensureRemoteAudioElement(): HTMLAudioElement | null {
+  if (typeof document === 'undefined') return null
+
+  // 优先使用 ref（如果已存在）
+  if (remoteAudioRef.value && document.contains(remoteAudioRef.value)) {
+    return remoteAudioRef.value
+  }
+
+  // 尝试从 DOM 查询（如果之前已创建）
+  const audioEl = document.querySelector('audio.remote-audio') as HTMLAudioElement | null
+  if (audioEl) {
+    remoteAudioRef.value = audioEl
+    return audioEl
+  }
+
+  // 如果都不存在，动态创建一个隐藏的 audio 元素
+  const newAudio = document.createElement('audio')
+  newAudio.className = 'remote-audio'
+  newAudio.style.position = 'fixed'
+  newAudio.style.bottom = '0'
+  newAudio.style.left = '0'
+  newAudio.style.width = '0'
+  newAudio.style.height = '0'
+  newAudio.style.opacity = '0'
+  newAudio.style.pointerEvents = 'none'
+  newAudio.setAttribute('playsinline', 'true')
+  newAudio.autoplay = true
+  document.body.appendChild(newAudio)
+  remoteAudioRef.value = newAudio
+  console.log('✅ [患者端]已动态创建远程音频元素')
+  return newAudio
+}
+
+/** H5：获取通话用的原生 video/audio 元素（与医生端布局保持一致） */
+function ensureCallVideoElements(): { localVideo: HTMLVideoElement | null; remoteVideo: HTMLVideoElement | null; remoteAudio: HTMLAudioElement | null } {
+  if (typeof document === 'undefined') {
+    return { localVideo: null, remoteVideo: null, remoteAudio: null }
+  }
+
+  let localVideo = localVideoRef.value as HTMLVideoElement | null
+  let remoteVideo = remoteVideoRef.value as HTMLVideoElement | null
+
+  // 若 ref 还未就绪，则从 DOM 中按类名查询
+  if (!localVideo || localVideo.tagName !== 'VIDEO') {
+    const localEl = document.querySelector('video.local-video') as HTMLVideoElement | null
+    if (localEl) {
+      localVideo = localEl
+      localVideoRef.value = localEl
+    }
+  }
+
+  if (!remoteVideo || remoteVideo.tagName !== 'VIDEO') {
+    const remoteEl = document.querySelector('video.remote-video') as HTMLVideoElement | null
+    if (remoteEl) {
+      remoteVideo = remoteEl
+      remoteVideoRef.value = remoteEl
+    }
+  }
+
+  const remoteAudio = ensureRemoteAudioElement()
+
+  return {
+    localVideo,
+    remoteVideo,
+    remoteAudio
+  }
+}
 
 function getCurrentPatientId(): string | null {
   return currentPatientId
@@ -455,7 +600,7 @@ async function autoPullLatestMessages() {
     // Socket未连接时，使用全量拉取
     const serverMessages = await loadLatestMessagesFromServer(false)
     if (serverMessages.length > 0) {
-      mergeMessages(serverMessages)
+      await mergeMessages(serverMessages)
     }
     return
   }
@@ -468,14 +613,14 @@ async function autoPullLatestMessages() {
   const serverMessages = await loadLatestMessagesFromServer(true, sinceTimestamp)
   if (serverMessages.length > 0) {
     console.log('✅ 自动拉取到', serverMessages.length, '条新消息')
-    mergeMessages(serverMessages)
+    await mergeMessages(serverMessages)
   }
 }
 
 /**
  * 合并服务器消息到本地消息列表（去重）
  */
-function mergeMessages(serverMessages: ChatMessage[]) {
+async function mergeMessages(serverMessages: ChatMessage[]) {
   if (!serverMessages || serverMessages.length === 0) {
     return
   }
@@ -511,8 +656,14 @@ function mergeMessages(serverMessages: ChatMessage[]) {
     scrollToBottom()
   }, 0)
     
-    // 保存咨询记录
-    saveCurrentConsultation()
+    // 保存咨询记录（使用 await 确保保存完成）
+    try {
+      await saveCurrentConsultation()
+      console.log('✅ 自动拉取消息后已保存咨询记录')
+    } catch (saveError) {
+      console.error('❌ 自动拉取消息后保存咨询记录失败:', saveError)
+      // 保存失败不影响消息显示
+    }
   }
 }
 
@@ -527,13 +678,17 @@ function startAutoPullTimer() {
   autoPullTimer = setInterval(() => {
     if (socketConnected.value) {
       // Socket已连接时，使用增量拉取
-      autoPullLatestMessages()
+      autoPullLatestMessages().catch(err => {
+        console.error('❌ 自动拉取消息失败:', err)
+      })
     } else {
       // Socket未连接时，使用全量拉取
-      loadLatestMessagesFromServer(false).then(serverMessages => {
+      loadLatestMessagesFromServer(false).then(async serverMessages => {
         if (serverMessages.length > 0) {
-          mergeMessages(serverMessages)
+          await mergeMessages(serverMessages)
         }
+      }).catch(err => {
+        console.error('❌ 拉取消息失败:', err)
       })
     }
   }, AUTO_PULL_INTERVAL)
@@ -553,7 +708,7 @@ function stopAutoPullTimer() {
 }
 
 /**
- * 监听页面可见性变化（当页面重新可见时自动拉取最新消息）
+ * 监听页面可见性变化（当页面重新可见时自动拉取最新消息并保存记录）
  */
 function setupVisibilityListener() {
   // #ifdef H5
@@ -561,8 +716,16 @@ function setupVisibilityListener() {
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        console.log('👁️ 页面重新可见，自动拉取最新消息')
-        autoPullLatestMessages()
+        console.log('👁️ 页面重新可见，自动拉取最新消息并保存记录')
+        // 先拉取最新消息
+        autoPullLatestMessages().then(() => {
+          // 拉取完成后保存记录
+          saveCurrentConsultation().catch(err => {
+            console.error('❌ 页面可见时保存记录失败:', err)
+          })
+        }).catch(err => {
+          console.error('❌ 页面可见时拉取消息失败:', err)
+        })
       }
     })
   }
@@ -584,6 +747,10 @@ function setupVisibilityListener() {
  */
 async function saveCurrentConsultation() {
   try {
+    // 获取全局应用实例
+    // @ts-ignore
+    const app = getApp()
+    
     // 获取患者ID（优先使用登录用户ID）
     const userInfo = getUserInfo()
     let patientId = currentPatientId || userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username || userInfo?.phone || null
@@ -635,13 +802,82 @@ async function saveCurrentConsultation() {
     
     console.log('📋 合并后的消息数量:', allMessages.length, '（本地:', messages.value.length, '服务器:', serverMessages.length, '）')
     
-    const consultationData = {
+    // 从消息中提取患者信息（优先从患者信息卡片消息中提取）
+    let finalPatientInfo = { ...patientInfo.value }
+    
+    // 查找患者信息卡片消息，提取患者信息
+    const patientCardMessage = allMessages.find(msg => 
+      msg.type === 'patient-card' && 
+      (msg as ChatMessage).patientCardData?.patientInfo
+    )
+    
+    if (patientCardMessage && (patientCardMessage as ChatMessage).patientCardData) {
+      const cardData = (patientCardMessage as ChatMessage).patientCardData
+      if (cardData.patientInfo) {
+        finalPatientInfo = {
+          ...finalPatientInfo,
+          ...cardData.patientInfo,
+          // 确保保留患者ID
+          id: cardData.patientInfo.id || patientId
+        }
+        console.log('✅ 从患者信息卡片中提取患者信息:', finalPatientInfo)
+      }
+    }
+    
+    // 如果患者信息仍然是默认值，尝试从全局数据中获取
+    if ((finalPatientInfo.name === '患者' || !finalPatientInfo.name || finalPatientInfo.name.trim() === '') && app.globalData?.consultData?.patient) {
+      finalPatientInfo = {
+        ...finalPatientInfo,
+        ...app.globalData.consultData.patient
+      }
+      console.log('✅ 从全局数据中恢复患者信息:', finalPatientInfo)
+    }
+    
+    // 如果还是没有有效的患者信息，尝试从本地存储的咨询记录中获取
+    if ((finalPatientInfo.name === '患者' || !finalPatientInfo.name || finalPatientInfo.name.trim() === '') && currentConsultationId) {
+      try {
+        const userInfo = getUserInfo()
+        const frontDeskUserId = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username || userInfo?.phone || null
+        if (frontDeskUserId) {
+          const { getConsultationById } = await import('@/utils/consultationStorage.js')
+          const storedConsultation = getConsultationById(currentConsultationId, frontDeskUserId)
+          if (storedConsultation?.patientInfo) {
+            finalPatientInfo = {
+              ...finalPatientInfo,
+              ...storedConsultation.patientInfo
+            }
+            console.log('✅ 从本地存储的咨询记录中恢复患者信息:', finalPatientInfo)
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ 从本地存储获取患者信息失败:', error)
+      }
+    }
+    
+    // 确保患者信息至少包含ID和基本字段
+    if (!finalPatientInfo.id) {
+      finalPatientInfo.id = patientId
+    }
+    if (!finalPatientInfo.name || finalPatientInfo.name.trim() === '') {
+      finalPatientInfo.name = '患者'
+    }
+    if (!finalPatientInfo.gender) {
+      finalPatientInfo.gender = '未知'
+    }
+    if (!finalPatientInfo.age) {
+      finalPatientInfo.age = 0
+    }
+    
+    console.log('💾 最终患者信息:', finalPatientInfo)
+    
+    // 先创建基础对象（不要在初始化表达式里引用自身，否则会触发 TDZ）
+    const consultationData: any = {
       id: currentConsultationId, // 如果存在则更新，否则创建新记录
       patientInfo: {
-        name: patientInfo.value.name,
-        gender: patientInfo.value.gender,
-        age: patientInfo.value.age,
-        id: patientId // 添加患者ID到patientInfo中
+        name: finalPatientInfo.name || '患者',
+        gender: finalPatientInfo.gender || '未知',
+        age: finalPatientInfo.age || 0,
+        id: finalPatientInfo.id || patientId // 添加患者ID到patientInfo中
       },
       symptomDescription: symptomDescription.value,
       symptomImages: symptomImages.value.map((img: any) => ({
@@ -650,103 +886,119 @@ async function saveCurrentConsultation() {
         type: img.type || 'image'
       })),
       doctorId: doctorId.value, // 确保包含医生ID
+      ...(doctorInfo.value && (doctorInfo.value.username || doctorInfo.value.name) && { doctorInfo: doctorInfo.value }), // 医生端用户名，供患者端展示
       patientId: patientId, // 确保包含患者ID
-      messages: allMessages.map(msg => {
-        // 对于图片消息，确保保存完整的图片数据
-        const messageData: any = {
-          id: msg.id,
-          content: msg.content,
-          type: msg.type,
-          isMe: msg.isMe,
-          timestamp: msg.timestamp
-        }
-        
-        // 如果是图片消息，确保 content 包含图片数据（base64 或 URL）
-        if (msg.type === 'image') {
-          // 确保图片内容被保存（base64 或 URL）
-          messageData.content = msg.content || ''
-          // 添加标识，表示这是图片消息
-          messageData.isImage = true
-          // 记录图片大小（用于调试）
-          const imageSize = msg.content ? msg.content.length : 0
-          if (imageSize > 0) {
-            console.log('📸 保存图片消息:', {
-              messageId: msg.id,
-              imageSize: `${(imageSize / 1024).toFixed(2)} KB`,
-              isBase64: msg.content.startsWith('data:image')
-            })
-          }
-        }
-        
-        // 如果是患者信息卡片消息，保存完整的卡片数据
-        if (msg.type === 'patient-card' && (msg as ChatMessage).patientCardData) {
-          messageData.patientCardData = (msg as ChatMessage).patientCardData
-          const cardData = messageData.patientCardData
-          
-          // 如果卡片信息存在，更新咨询记录中的患者信息、症状描述和图片
-          if (cardData) {
-            // 更新患者信息
-            if (cardData.patientInfo) {
-              consultationData.patientInfo = {
-                ...consultationData.patientInfo,
-                ...cardData.patientInfo
-              }
-            }
-            
-            // 更新症状描述（如果卡片中的描述更长或更详细）
-            if (cardData.symptomDescription) {
-              if (!consultationData.symptomDescription || 
-                  cardData.symptomDescription.length > consultationData.symptomDescription.length) {
-                consultationData.symptomDescription = cardData.symptomDescription
-              }
-            }
-            
-            // 更新图片（合并卡片中的图片）
-            if (cardData.images && cardData.images.length > 0) {
-              const imageMap = new Map()
-              // 先添加现有图片
-              consultationData.symptomImages.forEach((img: any) => {
-                const key = img.path || img.thumb || img
-                imageMap.set(key, img)
-              })
-              // 添加卡片中的图片
-              cardData.images.forEach(img => {
-                const imgObj = {
-                  path: img.url,
-                  thumb: img.thumb || img.url,
-                  type: img.type || 'image'
-                }
-                const key = imgObj.path || imgObj.thumb
-                if (!imageMap.has(key)) {
-                  imageMap.set(key, imgObj)
-                }
-              })
-              consultationData.symptomImages = Array.from(imageMap.values())
-            }
-            
-            console.log('💾 保存患者信息卡片到咨询记录:', {
-              messageId: msg.id,
-              patientInfo: consultationData.patientInfo,
-              symptomDescription: consultationData.symptomDescription,
-              imageCount: consultationData.symptomImages.length
-            })
-          }
-        }
-        
-        return messageData
-      })
-      // doctorId 和 patientId 已在上面定义（第599-600行），无需重复
+      messages: [] as any[]
     }
+
+    // 再生成 messages（此时 consultationData 已经初始化完毕，可以安全引用并更新）
+    consultationData.messages = allMessages.map(msg => {
+      // 对于图片消息，确保保存完整的图片数据
+      const messageData: any = {
+        id: msg.id,
+        content: msg.content,
+        type: msg.type,
+        isMe: msg.isMe,
+        timestamp: msg.timestamp
+      }
+
+      // 如果是图片消息，确保 content 包含图片数据（base64 或 URL）
+      if (msg.type === 'image') {
+        messageData.content = msg.content || ''
+        messageData.isImage = true
+      }
+
+      // 如果是患者信息卡片消息，保存完整的卡片数据，并用于回填咨询记录信息
+      if (msg.type === 'patient-card' && (msg as ChatMessage).patientCardData) {
+        messageData.patientCardData = (msg as ChatMessage).patientCardData
+        const cardData = messageData.patientCardData
+
+        if (cardData) {
+          // 更新患者信息
+          if (cardData.patientInfo) {
+            consultationData.patientInfo = {
+              ...(consultationData.patientInfo || {}),
+              ...cardData.patientInfo
+            }
+          }
+
+          // 更新症状描述（如果卡片中的描述更长或更详细）
+          if (cardData.symptomDescription) {
+            if (
+              !consultationData.symptomDescription ||
+              cardData.symptomDescription.length > consultationData.symptomDescription.length
+            ) {
+              consultationData.symptomDescription = cardData.symptomDescription
+            }
+          }
+
+          // 更新图片（合并卡片中的图片）
+          if (cardData.images && cardData.images.length > 0) {
+            const imageMap = new Map()
+            const existingImages = Array.isArray(consultationData.symptomImages) ? consultationData.symptomImages : []
+
+            // 先添加现有图片
+            existingImages.forEach((img: any) => {
+              const key = img?.path || img?.thumb || img
+              imageMap.set(key, img)
+            })
+
+            // 添加卡片中的图片
+            cardData.images.forEach((img: any) => {
+              const imgObj = {
+                path: img.url,
+                thumb: img.thumb || img.url,
+                type: img.type || 'image'
+              }
+              const key = imgObj.path || imgObj.thumb
+              if (!imageMap.has(key)) {
+                imageMap.set(key, imgObj)
+              }
+            })
+            consultationData.symptomImages = Array.from(imageMap.values())
+          }
+        }
+      }
+
+      return messageData
+    })
     
     // 保存咨询记录到本地存储，传递前台账号ID作为存储key
     // 注意：这里应该使用前台账号ID（userId），而不是患者ID（patientId）
     // 患者ID应该存储在 consultationData.patientId 中
     const frontDeskUserId = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username || userInfo?.phone || null
-    const savedId = saveConsultation(consultationData, frontDeskUserId)
-    // 更新当前咨询记录ID（如果之前没有，现在有了）
-    if (!currentConsultationId || currentConsultationId !== savedId) {
-      currentConsultationId = savedId
-      console.log('📝 更新当前咨询记录ID:', savedId)
+    
+    console.log('💾 准备保存到本地存储:', {
+      frontDeskUserId,
+      consultationId: consultationData.id,
+      patientId: consultationData.patientId,
+      messageCount: consultationData.messages.length,
+      patientName: consultationData.patientInfo?.name
+    })
+    
+    let savedId: string | null = null
+    try {
+      savedId = saveConsultation(consultationData, frontDeskUserId)
+      console.log('✅ 本地存储保存成功，咨询记录ID:', savedId)
+      
+      // 更新当前咨询记录ID（如果之前没有，现在有了）
+      if (!currentConsultationId || currentConsultationId !== savedId) {
+        currentConsultationId = savedId
+        console.log('📝 更新当前咨询记录ID:', savedId)
+      }
+    } catch (saveError: any) {
+      console.error('❌ 保存到本地存储失败:', saveError)
+      console.error('错误详情:', {
+        message: saveError.message,
+        stack: saveError.stack,
+        consultationData: {
+          id: consultationData.id,
+          patientId: consultationData.patientId,
+          messageCount: consultationData.messages.length
+        }
+      })
+      // 即使保存失败，也继续执行（不影响后续流程）
+      throw saveError // 重新抛出错误，让外层catch处理
     }
     
     // 同步咨询记录到后台（确保后台也有记录）
@@ -770,11 +1022,10 @@ async function saveCurrentConsultation() {
             patientInfo: consultationData.patientInfo,
             symptomDescription: consultationData.symptomDescription,
             symptomImages: consultationData.symptomImages,
-            createdBy: frontDeskUserId // 传递前台账号ID
+            createdBy: frontDeskUserId
           },
-          needAuth: true,
-          showLoading: true,
-          showError: true
+          showLoading: false,
+          showError: false
         })
         
         if (syncResponse.success && syncResponse.data) {
@@ -798,12 +1049,51 @@ async function saveCurrentConsultation() {
     }
     
     console.log('✅ 咨询记录已保存（包含最新消息）:', savedId, '患者ID:', patientId, '消息数:', allMessages.length)
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ 保存咨询记录失败:', error)
+    console.error('错误详情:', {
+      message: error.message,
+      stack: error.stack,
+      patientId: currentPatientId,
+      messageCount: messages.value.length
+    })
+    
+    // 显示错误提示给用户（但不阻塞界面）
+    uni.showToast({
+      title: '保存失败: ' + (error.message || '未知错误'),
+      icon: 'none',
+      duration: 3000
+    })
+    
+    // 重新抛出错误，让调用者知道保存失败
+    throw error
   }
 }
 
 onMounted(async () => {
+  // 页面加载时先检查是否已有连接
+  // #ifdef H5
+  const existingSocket = getSocketInstance()
+  if (existingSocket) {
+    const isAlreadyConnected = existingSocket.connected === true
+    socketConnected.value = isAlreadyConnected
+    console.log('📊 页面加载时检查Socket状态:', isAlreadyConnected ? '已连接' : '未连接')
+    
+    // 如果已连接，添加监听器并启动状态检查
+    if (isAlreadyConnected) {
+      existingSocket.on('disconnect', () => {
+        socketConnected.value = false
+        stopSocketStatusCheck()
+      })
+      existingSocket.on('reconnect', () => {
+        socketConnected.value = true
+        startSocketStatusCheck()
+      })
+      // 启动定时检查
+      startSocketStatusCheck()
+    }
+  }
+  // #endif
   // 从全局数据获取病情描述和文件
   // @ts-ignore
   const app = getApp()
@@ -819,6 +1109,13 @@ onMounted(async () => {
     if (consultData.doctorId) {
       doctorId.value = consultData.doctorId
       console.log('✅ 恢复医生ID:', doctorId.value, '（确保使用同一个医生，不会创建新记录）')
+    }
+
+    // 设置医生信息（如果传递了，优先用于头部显示医生端用户名）
+    if (consultData.doctorInfo) {
+      doctorInfo.value = consultData.doctorInfo
+    } else if (consultData.doctor) {
+      doctorInfo.value = consultData.doctor
     }
     
     // 设置患者ID（如果传递了）
@@ -862,10 +1159,61 @@ onMounted(async () => {
         timestamp: msg.timestamp
       }))
       
+      console.log('✅ 从全局数据恢复消息，消息数:', messages.value.length)
+      
       // 滚动到底部显示最新消息
       nextTick(() => {
         scrollToBottom()
       })
+    } else if (currentConsultationId) {
+      // 如果全局数据中没有消息，尝试从本地存储加载
+      try {
+        const userInfo = getUserInfo()
+        const frontDeskUserId = userInfo?.id || userInfo?._id || userInfo?.userId || userInfo?.username || userInfo?.phone || null
+        
+        if (frontDeskUserId) {
+          const { getConsultationById } = await import('@/utils/consultationStorage.js')
+          const storedConsultation = getConsultationById(currentConsultationId, frontDeskUserId)
+          
+          if (storedConsultation && storedConsultation.messages && storedConsultation.messages.length > 0) {
+            messages.value = storedConsultation.messages.map((msg: any) => ({
+              id: msg.id,
+              content: msg.content,
+              type: msg.type || 'text',
+              isMe: msg.isMe,
+              timestamp: msg.timestamp
+            }))
+            
+            console.log('✅ 从本地存储恢复消息，消息数:', messages.value.length)
+            
+            // 同时恢复患者信息（如果本地存储中有）
+            if (storedConsultation.patientInfo) {
+              patientInfo.value = {
+                ...patientInfo.value,
+                ...storedConsultation.patientInfo
+              }
+              console.log('✅ 从本地存储恢复患者信息:', patientInfo.value)
+            }
+            
+            // 恢复症状描述和图片
+            if (storedConsultation.symptomDescription) {
+              symptomDescription.value = storedConsultation.symptomDescription
+            }
+            if (storedConsultation.symptomImages && storedConsultation.symptomImages.length > 0) {
+              symptomImages.value = storedConsultation.symptomImages
+            }
+            
+            // 滚动到底部显示最新消息
+            nextTick(() => {
+              scrollToBottom()
+            })
+          } else {
+            console.log('ℹ️ 本地存储中没有消息，将在连接Socket后从后端加载')
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ 从本地存储加载消息失败:', error)
+      }
     }
   }
 
@@ -899,7 +1247,14 @@ onMounted(async () => {
   // 初始化通话管理器
   // #ifdef H5
   callManager = getCallManager()
-  
+  // 对方挂断时显示「对方已挂断」，约 1.5 秒后关闭通话界面
+  callManager.setOnEndedByRemote(() => {
+    callStatusText.value = '对方已挂断'
+    setTimeout(() => {
+      isInCall.value = false
+      callStatusText.value = ''
+    }, 1500)
+  })
   // 监听来电
   onIncomingCall((data) => {
     handleIncomingCall(data)
@@ -913,19 +1268,76 @@ watch(messages, () => {
   if (messages.value.length > 0) {
     // 确保消息按时间排序（最新的在底部）
     messages.value.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-    saveCurrentConsultation()
+    // 异步保存咨询记录（watch回调不能是async，所以使用立即执行函数）
+    ;(async () => {
+      try {
+        await saveCurrentConsultation()
+      } catch (error) {
+        console.error('❌ 监听消息变化时保存咨询记录失败:', error)
+      }
+    })()
     
     // 自动滚动到底部显示最新消息
     scrollToBottom()
   }
 })
 
-onUnmounted(() => {
+/**
+ * 启动Socket连接状态定时检查（确保UI状态同步）
+ */
+function startSocketStatusCheck() {
+  // 清除旧的定时器
+  if (socketStatusCheckTimer) {
+    clearInterval(socketStatusCheckTimer)
+  }
+  
+  // 每2秒检查一次连接状态
+  socketStatusCheckTimer = setInterval(() => {
+    // #ifdef H5
+    const socketInstance = getSocketInstance()
+    if (socketInstance) {
+      const isActuallyConnected = socketInstance.connected === true
+      // 如果实际状态与UI状态不一致，更新UI
+      if (socketConnected.value !== isActuallyConnected) {
+        console.log(`🔄 检测到连接状态不一致，更新UI: ${socketConnected.value} -> ${isActuallyConnected}`)
+        socketConnected.value = isActuallyConnected
+      }
+    } else {
+      // 如果没有socket实例，确保UI显示未连接
+      if (socketConnected.value) {
+        console.log('🔄 Socket实例不存在，更新UI为未连接')
+        socketConnected.value = false
+      }
+    }
+    // #endif
+  }, 2000) // 每2秒检查一次
+}
+
+/**
+ * 停止Socket连接状态检查
+ */
+function stopSocketStatusCheck() {
+  if (socketStatusCheckTimer) {
+    clearInterval(socketStatusCheckTimer)
+    socketStatusCheckTimer = null
+  }
+}
+
+onUnmounted(async () => {
   // 停止自动拉取定时器
   stopAutoPullTimer()
   
-  // 保存咨询记录
-  saveCurrentConsultation()
+  // 停止Socket状态检查定时器
+  stopSocketStatusCheck()
+  
+  // 保存咨询记录（确保在页面卸载前保存）
+  try {
+    await saveCurrentConsultation()
+    console.log('✅ 页面卸载前已保存咨询记录')
+  } catch (error) {
+    console.error('❌ 页面卸载前保存咨询记录失败:', error)
+  }
+  
   // 断开 Socket.IO 连接
   offMessage()
   disconnectSocket()
@@ -935,6 +1347,46 @@ onUnmounted(() => {
   }
   offIncomingCall()
 })
+
+/** 重新连接 Socket.IO（未连接时用户点击「重新连接」） */
+async function retrySocketConnection() {
+  if (reconnecting.value) return
+  reconnecting.value = true
+  
+  console.log('🔄 用户点击重新连接，开始重连流程...')
+  
+  try {
+    // 先检查当前状态
+    // #ifdef H5
+    const currentSocket = getSocketInstance()
+    if (currentSocket) {
+      console.log('📊 重连前Socket状态:', {
+        connected: currentSocket.connected,
+        id: currentSocket.id,
+        disconnected: currentSocket.disconnected
+      })
+    }
+    // #endif
+    
+    disconnectSocket()
+    console.log('✅ 已断开旧连接')
+    
+    // 等待一小段时间确保断开完成
+    await new Promise(resolve => setTimeout(resolve, 500))
+    
+    await initSocketService()
+    console.log('✅ 重新连接完成')
+  } catch (e) {
+    console.error('❌ 重新连接失败:', e)
+    uni.showToast({
+      title: '连接失败，请检查后端服务',
+      icon: 'none',
+      duration: 2000
+    })
+  } finally {
+    reconnecting.value = false
+  }
+}
 
 /**
  * 初始化 Socket.IO 服务
@@ -974,62 +1426,183 @@ async function initSocketService() {
     console.log('👤 患者ID:', patientId)
     console.log('👤 患者信息:', patientInfo.value)
     
-    // 连接 Socket.IO，传递真实的用户信息
-    await connectSocket(patientId, {
-      name: patientInfo.value.name,
-      avatar: userInfo?.avatar || '👤',
-      gender: patientInfo.value.gender,
-      age: patientInfo.value.age,
-      userId: patientId
+    // 先设置监听器（在连接之前，避免错过事件）
+    // #ifdef H5
+    // 先检查是否已有socket实例（可能之前已连接）
+    let socketInstance = getSocketInstance()
+    if (socketInstance) {
+      // 先移除旧的监听器（避免重复监听）
+      socketInstance.off('connect')
+      socketInstance.off('disconnect')
+      socketInstance.off('reconnect')
+      socketInstance.off('reconnect_failed')
+      socketInstance.off('connect_error')
+    }
+    // #endif
+
+    // 连接成功时立即注册通话信令监听（在 resolve 前执行），避免 offer 先到被丢弃
+    // #ifdef H5
+    setOnSocketConnectCallback(() => {
+      const cm = getCallManager()
+      cm.init()
     })
+    // #endif
     
-    socketConnected.value = true
-    console.log('✅ Socket.IO 连接成功')
+    // 连接 Socket.IO，传递真实的用户信息
+    try {
+      await connectSocket(patientId, {
+        name: patientInfo.value.name,
+        avatar: userInfo?.avatar || '👤',
+        gender: patientInfo.value.gender,
+        age: patientInfo.value.age,
+        userId: patientId
+      })
+      
+      // 连接后立即检查实际连接状态（延迟一点确保连接完成）
+      // #ifdef H5
+      socketInstance = getSocketInstance()
+      if (socketInstance) {
+        // 延迟检查，确保连接事件已触发
+        setTimeout(() => {
+          const isCurrentlyConnected = socketInstance?.connected === true
+          socketConnected.value = isCurrentlyConnected
+          console.log('📊 Socket.IO 当前连接状态（延迟检查）:', isCurrentlyConnected ? '已连接' : '未连接')
+        }, 500)
+        
+        // 添加监听器，实时更新UI状态
+        // 监听连接成功
+        socketInstance.on('connect', () => {
+          console.log('✅ Socket.IO 连接成功，更新UI状态')
+          socketConnected.value = true
+          // 启动定时检查，确保状态同步
+          startSocketStatusCheck()
+        })
+        
+        // 监听断开连接
+        socketInstance.on('disconnect', (reason) => {
+          console.log('⚠️ Socket.IO 断开连接:', reason)
+          socketConnected.value = false
+          stopSocketStatusCheck() // 断开时停止检查
+        })
+        
+        // 监听重连成功
+        socketInstance.on('reconnect', (attemptNumber) => {
+          console.log(`🔄 Socket.IO 重连成功 (尝试 ${attemptNumber} 次)，更新UI状态`)
+          socketConnected.value = true
+          setTimeout(() => {
+            autoPullLatestMessages()
+          }, 1000) // 延迟1秒，确保连接稳定
+        })
+        
+        // 监听重连失败
+        socketInstance.on('reconnect_failed', () => {
+          console.error('❌ Socket.IO 重连失败')
+          socketConnected.value = false
+        })
+        
+        // 监听连接错误
+        socketInstance.on('connect_error', (error) => {
+          console.error('❌ Socket.IO 连接错误:', error)
+          socketConnected.value = false
+        })
+      } else {
+        socketConnected.value = false
+        console.warn('⚠️ Socket实例不存在')
+      }
+      // #endif
+      
+      console.log('✅ Socket.IO 初始化完成')
+    } catch (connectError: any) {
+      // 连接失败，但不抛出错误，允许继续执行（部分功能可能仍可使用）
+      socketConnected.value = false
+      console.error('❌ Socket.IO 连接失败:', connectError)
+      console.warn('⚠️ Socket.IO 连接失败，部分实时功能可能不可用，但可以继续使用其他功能')
+      // 不抛出错误，允许继续执行（保存等功能仍可使用）
+    }
     
     // 监听接收消息
     onMessage(handleReceiveMessage)
-    
-    // 监听Socket重连事件，重连成功后自动拉取最新消息
-    // #ifdef H5
-    const socketInstance = getSocketInstance()
-    if (socketInstance) {
-      socketInstance.on('reconnect', () => {
-        console.log('🔄 Socket.IO 重连成功，自动拉取最新消息')
-        setTimeout(() => {
-          autoPullLatestMessages()
-        }, 1000) // 延迟1秒，确保连接稳定
-      })
-    }
-    // #endif
     
     // 连接成功后，先从后端加载最新消息历史
     // 如果是从"我的咨询"进入（已有消息），则从后端补充最新消息
     // 如果是新咨询，则从后端加载所有消息
     try {
+      console.log('🔄 开始从后端加载历史消息...', {
+        currentPatientId,
+        doctorId: doctorId.value,
+        localMessagesCount: messages.value.length
+      })
+      
       const serverMessages = await loadLatestMessagesFromServer()
+      console.log('📦 后端返回消息数量:', serverMessages.length)
+      
       if (serverMessages.length > 0) {
         console.log('✅ 从后端加载', serverMessages.length, '条最新消息')
+        console.log('📋 后端消息详情:', serverMessages.map(msg => ({
+          id: msg.id,
+          content: msg.content?.substring(0, 30),
+          isMe: msg.isMe,
+          timestamp: new Date(msg.timestamp).toLocaleString()
+        })))
         
         // 合并到本地消息（去重）
         const messageMap = new Map<string, ChatMessage>()
         
         // 先添加本地消息（如果是从"我的咨询"进入，这些消息已经存在）
+        // 优先保留本地消息，因为本地消息可能包含更完整的数据（如患者信息卡片）
         messages.value.forEach(msg => {
           const key = msg.id || `${msg.timestamp}_${msg.content}`
-          messageMap.set(key, msg)
+          // 如果消息有ID，使用ID作为key；否则使用时间戳+内容
+          if (msg.id) {
+            messageMap.set(msg.id, msg)
+          } else {
+            messageMap.set(key, msg)
+          }
         })
+        console.log('📋 本地消息数量:', messages.value.length, '消息IDs:', messages.value.map(m => m.id).filter(Boolean))
         
         // 添加服务器消息（如果有相同的ID则更新，否则添加）
+        // 注意：如果本地消息和服务器消息有相同的ID，优先保留本地消息（因为本地消息可能包含更完整的数据）
         serverMessages.forEach(msg => {
           const key = msg.id || `${msg.timestamp}_${msg.content}`
-          const existing = messageMap.get(key)
-          if (!existing || (existing.timestamp < msg.timestamp)) {
-            messageMap.set(key, msg)
+          if (msg.id) {
+            // 如果服务器消息有ID，检查本地是否已有
+            const existing = messageMap.get(msg.id)
+            if (!existing) {
+              // 本地没有，添加服务器消息
+              messageMap.set(msg.id, msg)
+            } else {
+              // 本地已有，但服务器消息更新，则更新（保留本地消息的额外数据，如patientCardData）
+              if (existing.timestamp < msg.timestamp) {
+                // 合并数据：保留本地消息的额外字段，更新服务器消息的字段
+                messageMap.set(msg.id, {
+                  ...msg,
+                  ...existing,
+                  ...msg, // 服务器消息的字段优先
+                  patientCardData: (existing as ChatMessage).patientCardData || msg.patientCardData
+                })
+              }
+            }
+          } else {
+            // 服务器消息没有ID，使用时间戳+内容作为key
+            const existing = messageMap.get(key)
+            if (!existing || (existing.timestamp < msg.timestamp)) {
+              messageMap.set(key, msg)
+            }
           }
         })
         
         // 更新消息列表（按时间排序）
-        messages.value = Array.from(messageMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+        const mergedMessages = Array.from(messageMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+        messages.value = mergedMessages
+        
+        console.log('✅ 消息合并完成，最终消息数量:', mergedMessages.length)
+        console.log('📋 合并后消息详情:', mergedMessages.map(msg => ({
+          id: msg.id,
+          content: msg.content?.substring(0, 30),
+          isMe: msg.isMe,
+          timestamp: new Date(msg.timestamp).toLocaleString()
+        })))
         
         // 滚动到底部
         nextTick(() => {
@@ -1040,21 +1613,24 @@ async function initSocketService() {
         console.log('ℹ️ 后端和本地都没有消息，这是新咨询')
       } else {
         // 后端没有消息，但本地有消息（从"我的咨询"进入）
-        console.log('ℹ️ 后端没有新消息，使用本地消息（从"我的咨询"进入）')
+        console.log('ℹ️ 后端没有新消息，使用本地消息（从"我的咨询"进入），本地消息数:', messages.value.length)
       }
     } catch (error) {
       console.error('❌ 加载最新消息失败:', error)
       // 即使加载失败，也继续使用本地消息
       if (messages.value.length > 0) {
-        console.log('✅ 使用本地消息（从"我的咨询"进入）')
+        console.log('✅ 使用本地消息（从"我的咨询"进入），本地消息数:', messages.value.length)
+      } else {
+        console.warn('⚠️ 后端加载失败且本地也没有消息，可能无法显示历史记录')
       }
     }
     
     // 连接成功后，自动发送咨询信息给医生
-    await sendConsultInfoToDoctor()
-    
-    // 初始化保存咨询记录（会再次从后端获取最新消息）
-    saveCurrentConsultation()
+    try {
+      await sendConsultInfoToDoctor()
+    } catch (error) {
+      console.warn('⚠️ 发送咨询信息失败（不影响连接）:', error)
+    }
     
     // 确保滚动到底部显示最新消息
     scrollToBottom()
@@ -1065,21 +1641,54 @@ async function initSocketService() {
     // 设置页面可见性监听
     setupVisibilityListener()
     
+    // 立即隐藏loading，不等待保存完成（避免一直显示"处理中..."）
     uni.hideLoading()
     uni.showToast({
       title: '连接成功',
       icon: 'success',
       duration: 1500
     })
+    
+    // 初始化保存咨询记录（异步执行，不阻塞主流程）
+    // 这个操作可能比较耗时，所以在隐藏loading后再执行
+    saveCurrentConsultation().then(() => {
+      console.log('✅ 初始化时已保存咨询记录')
+    }).catch((error) => {
+      console.error('❌ 初始化时保存咨询记录失败:', error)
+      // 保存失败不影响主流程
+    })
   } catch (error: any) {
     uni.hideLoading()
     console.error('❌ Socket.IO 初始化失败:', error)
-    const errorMsg = error.message || '连接失败，请稍后重试'
+    console.error('错误详情:', {
+      type: error.type,
+      message: error.message,
+      description: error.description,
+      originalError: error.originalError
+    })
+    
+    // 分析错误类型，提供更友好的错误信息
+    let errorMsg = error.message || '连接失败，请稍后重试'
+    let errorDetails = ''
+    
+    if (error.message) {
+      if (error.message.includes('Invalid frame header') || error.message.includes('websocket error')) {
+        errorMsg = 'WebSocket 连接失败'
+        errorDetails = '可能原因：\n1. 后端服务未启动\n2. 端口3000被其他服务占用\n3. 网络连接问题\n\n解决方案：\n请确保后端服务正在运行（http://localhost:3000）'
+      } else if (error.message.includes('ECONNREFUSED') || error.message.includes('timeout')) {
+        errorMsg = '无法连接到服务器'
+        errorDetails = '后端服务可能未启动，请检查：\n1. 后端服务是否在运行\n2. 端口3000是否被占用\n3. 防火墙设置'
+      } else if (error.type === 'TransportError') {
+        errorMsg = '传输错误'
+        errorDetails = `错误：${error.description || error.message}\n\n可能原因：\n1. WebSocket握手失败\n2. 服务器不支持WebSocket协议\n3. 网络中间件干扰`
+      }
+    }
     
     // 显示详细错误信息
+    const fullMessage = errorDetails ? `${errorMsg}\n\n${errorDetails}` : errorMsg
     uni.showModal({
       title: '连接失败',
-      content: errorMsg + '\n\n请检查：\n1. 后端服务是否启动\n2. 网络连接是否正常',
+      content: fullMessage + '\n\n提示：\n1. 确保后端服务正在运行（http://localhost:3000）\n2. 检查后端控制台是否有错误\n3. 尝试刷新页面重试\n4. 连接失败不影响部分功能使用',
       showCancel: false,
       confirmText: '知道了'
     })
@@ -1264,7 +1873,7 @@ async function sendConsultInfoToDoctor() {
     // 可选：如果图片较少（<=3张），也发送完整的患者信息卡片
     if (symptomImages.value.length > 0 && symptomImages.value.length <= 3) {
       try {
-        const imagesWithBase64 = await Promise.all(
+        const imagesWithBase64 = (await Promise.all(
           symptomImages.value.map(async (img: any) => {
             try {
               const imagePath = img.path || img.thumb || img
@@ -1275,15 +1884,11 @@ async function sendConsultInfoToDoctor() {
                 thumb: base64
               }
             } catch (error: any) {
-              console.error('转换图片失败:', error)
-              return {
-                url: img.path || img.thumb || img,
-                type: img.type || 'image',
-                thumb: img.thumb || img.path || img
-              }
+              console.error('转换图片失败，跳过该图片（避免将本地 path 发给医生端导致加载失败）:', error)
+              return null
             }
           })
-        )
+        )).filter((x) => x != null) as { url: string; type: string; thumb: string }[]
         
         const patientCardData: PatientCardData = {
           patientInfo: {
@@ -1342,7 +1947,7 @@ async function sendConsultInfoToDoctor() {
 /**
  * 处理接收到的消息（患者端接收医生消息）
  */
-function handleReceiveMessage(message: any) {
+async function handleReceiveMessage(message: any) {
   // 患者端接收所有来自医生的消息（fromUserId 是医生ID）
   const patientId = getCurrentPatientId()
   console.log('📨 患者端收到消息:', {
@@ -1431,13 +2036,32 @@ function handleReceiveMessage(message: any) {
     }
     
     messages.value.push(chatMessage)
-    // 确保消息按时间排序（最新的在底部）
     messages.value.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-    
+
+    // 医生回复时：用实际聊天医生更新 doctorId / doctorInfo（后端已填充 fromUserName）
+    if (message.fromUserId) {
+      doctorId.value = message.fromUserId
+      if (message.fromUserName) {
+        doctorInfo.value = { username: message.fromUserName, name: message.fromUserName }
+        console.log('✅ 已更新为实际聊天医生:', doctorId.value, doctorInfo.value.username)
+      }
+    }
+
     // 立即保存咨询记录（确保医生回复的消息也被保存）
-    nextTick(() => {
-      saveCurrentConsultation()
-    })
+    // 使用 await 确保保存操作完成
+    try {
+      await saveCurrentConsultation()
+      console.log('✅ 患者端已保存咨询记录（包含医生回复），消息数:', messages.value.length)
+    } catch (saveError: any) {
+      console.error('❌ 患者端保存咨询记录失败:', saveError)
+      console.error('保存失败详情:', {
+        message: saveError.message,
+        messageCount: messages.value.length,
+        patientId: currentPatientId
+      })
+      // 保存失败不影响消息显示，但需要记录错误
+      // 不显示错误提示，避免打扰用户（因为消息已经显示了）
+    }
     
     // 滚动到底部
     scrollToBottom()
@@ -1501,47 +2125,13 @@ const startVideoCall = async () => {
     
     await nextTick()
     
-    // 获取视频元素（uni-app的video组件需要特殊处理）
-    let localVideo: any = null
-    let remoteVideo: any = null
-    
-    // #ifdef H5
-    // H5环境下，尝试获取原生video元素
-    // 方法1：通过 ref 获取
-    if (localVideoRef.value) {
-      localVideo = localVideoRef.value.$el || localVideoRef.value
-      if (localVideo && localVideo.tagName !== 'VIDEO') {
-        localVideo = localVideo.querySelector('video') || localVideo
-      }
+    // H5：使用动态创建的原生 video，避免 uni-app Video 导致 currentTime/srcObject 报错
+    const { localVideo, remoteVideo } = ensureCallVideoElements()
+    if (!localVideo || !remoteVideo) {
+      uni.showToast({ title: '无法创建视频元素', icon: 'none' })
+      isInCall.value = false
+      return
     }
-    if (remoteVideoRef.value) {
-      remoteVideo = remoteVideoRef.value.$el || remoteVideoRef.value
-      if (remoteVideo && remoteVideo.tagName !== 'VIDEO') {
-        remoteVideo = remoteVideo.querySelector('video') || remoteVideo
-      }
-    }
-    
-    // 方法2：如果 ref 获取失败，通过 DOM 查询获取
-    if (!localVideo || localVideo.tagName !== 'VIDEO') {
-      const localVideoEl = document.querySelector('video.local-video') as HTMLVideoElement
-      if (localVideoEl) {
-        localVideo = localVideoEl
-        console.log('✅ 通过DOM查询找到本地视频元素')
-      }
-    }
-    if (!remoteVideo || remoteVideo.tagName !== 'VIDEO') {
-      const remoteVideoEl = document.querySelector('video.remote-video') as HTMLVideoElement
-      if (remoteVideoEl) {
-        remoteVideo = remoteVideoEl
-        console.log('✅ 通过DOM查询找到远程视频元素')
-      }
-    }
-    
-    console.log('📹 视频元素获取结果:', {
-      localVideo: localVideo?.tagName,
-      remoteVideo: remoteVideo?.tagName
-    })
-    // #endif
     
     await callManager.startCall(doctorId.value, 'video', localVideo, remoteVideo)
     callStatusText.value = '通话中...'
@@ -1561,13 +2151,20 @@ const startVideoCall = async () => {
   // #endif
   
   // #ifndef H5
-  // 移动端提示
+  // APP 端：跳转 TRTC 通话页（需已配置腾讯云并安装插件）
   // #ifdef APP-PLUS
-  uni.showModal({
-    title: '功能提示',
-    content: 'APP 环境下实时视频通话需要集成原生插件或第三方 SDK（如腾讯云 TRTC、声网 Agora）。\n\n当前可以使用图片/视频选择功能进行咨询。',
-    showCancel: false,
-    confirmText: '知道了'
+  const patientId = currentPatientId || (getUserInfo()?.id || getUserInfo()?._id || getUserInfo()?.userId || '') || ('patient_' + Date.now())
+  const roomId = `consult_${doctorId.value}_${patientId}`.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 32)
+  uni.navigateTo({
+    url: `/pages/online-consult/trtc-call?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(patientId)}&callType=video&targetLabel=${encodeURIComponent(doctorDisplayName || '医生')}`,
+    fail: () => {
+      uni.showModal({
+        title: '功能提示',
+        content: 'APP 端视频通话需安装腾讯云 TRTC 插件并配置。当前可使用图片/视频进行咨询。',
+        showCancel: false,
+        confirmText: '知道了'
+      })
+    }
   })
   // #endif
   
@@ -1609,41 +2206,23 @@ const startAudioCall = async () => {
     
     await nextTick()
     
-    // 获取视频元素
-    let localVideo: any = null
-    let remoteVideo: any = null
-    
     // #ifdef H5
-    // 方法1：通过 ref 获取
-    if (localVideoRef.value) {
-      localVideo = localVideoRef.value.$el || localVideoRef.value
-      if (localVideo && localVideo.tagName !== 'VIDEO') {
-        localVideo = localVideo.querySelector('video') || localVideo
-      }
-    }
-    if (remoteVideoRef.value) {
-      remoteVideo = remoteVideoRef.value.$el || remoteVideoRef.value
-      if (remoteVideo && remoteVideo.tagName !== 'VIDEO') {
-        remoteVideo = remoteVideo.querySelector('video') || remoteVideo
-      }
-    }
-    
-    // 方法2：如果 ref 获取失败，通过 DOM 查询获取
-    if (!localVideo || localVideo.tagName !== 'VIDEO') {
-      const localVideoEl = document.querySelector('video.local-video') as HTMLVideoElement
-      if (localVideoEl) {
-        localVideo = localVideoEl
-      }
-    }
-    if (!remoteVideo || remoteVideo.tagName !== 'VIDEO') {
-      const remoteVideoEl = document.querySelector('video.remote-video') as HTMLVideoElement
-      if (remoteVideoEl) {
-        remoteVideo = remoteVideoEl
-      }
+    const { localVideo, remoteVideo, remoteAudio } = ensureCallVideoElements()
+    if (!remoteVideo) {
+      uni.showToast({ title: '无法创建媒体元素', icon: 'none' })
+      isInCall.value = false
+      return
     }
     // #endif
+    // #ifndef H5
+    const localVideo = null
+    const remoteVideo = null
+    const remoteAudio = null
+    // #endif
     
-    await callManager.startCall(doctorId.value, 'audio', localVideo, remoteVideo)
+    await callManager.startCall(doctorId.value, 'audio', localVideo, remoteVideo, remoteAudio)
+    // 在用户点击“发起语音通话”按钮后，主动尝试播放远程音频一次
+    ensureRemoteAudioPlayingOnH5()
     callStatusText.value = '通话中...'
   } catch (error: any) {
     console.error('发起语音通话失败:', error)
@@ -1663,11 +2242,18 @@ const startAudioCall = async () => {
   // #ifndef H5
   // 移动端提示
   // #ifdef APP-PLUS
-  uni.showModal({
-    title: '功能提示',
-    content: 'APP 环境下实时语音通话需要集成原生插件或第三方 SDK（如腾讯云 TRTC、声网 Agora）。\n\n当前可以使用图片/视频选择功能进行咨询。',
-    showCancel: false,
-    confirmText: '知道了'
+  const patientId = currentPatientId || (getUserInfo()?.id || getUserInfo()?._id || getUserInfo()?.userId || '') || ('patient_' + Date.now())
+  const roomId = `consult_${doctorId.value}_${patientId}`.replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 32)
+  uni.navigateTo({
+    url: `/pages/online-consult/trtc-call?roomId=${encodeURIComponent(roomId)}&userId=${encodeURIComponent(patientId)}&callType=audio&targetLabel=${encodeURIComponent(doctorDisplayName || '医生')}`,
+    fail: () => {
+      uni.showModal({
+        title: '功能提示',
+        content: 'APP 端语音通话需安装腾讯云 TRTC 插件并配置。当前可使用图片/视频进行咨询。',
+        showCancel: false,
+        confirmText: '知道了'
+      })
+    }
   })
   // #endif
   
@@ -1710,43 +2296,25 @@ const handleIncomingCall = async (data: any) => {
           
           await nextTick()
           
-          // 获取视频元素
-          let localVideo: any = null
-          let remoteVideo: any = null
-          
           // #ifdef H5
-          // 方法1：通过 ref 获取
-          if (localVideoRef.value) {
-            localVideo = localVideoRef.value.$el || localVideoRef.value
-            if (localVideo && localVideo.tagName !== 'VIDEO') {
-              localVideo = localVideo.querySelector('video') || localVideo
-            }
-          }
-          if (remoteVideoRef.value) {
-            remoteVideo = remoteVideoRef.value.$el || remoteVideoRef.value
-            if (remoteVideo && remoteVideo.tagName !== 'VIDEO') {
-              remoteVideo = remoteVideo.querySelector('video') || remoteVideo
-            }
-          }
-          
-          // 方法2：如果 ref 获取失败，通过 DOM 查询获取
-          if (!localVideo || localVideo.tagName !== 'VIDEO') {
-            const localVideoEl = document.querySelector('video.local-video') as HTMLVideoElement
-            if (localVideoEl) {
-              localVideo = localVideoEl
-              console.log('✅ 通过DOM查询找到本地视频元素（接听）')
-            }
-          }
-          if (!remoteVideo || remoteVideo.tagName !== 'VIDEO') {
-            const remoteVideoEl = document.querySelector('video.remote-video') as HTMLVideoElement
-            if (remoteVideoEl) {
-              remoteVideo = remoteVideoEl
-              console.log('✅ 通过DOM查询找到远程视频元素（接听）')
-            }
+          const { localVideo, remoteVideo, remoteAudio } = ensureCallVideoElements()
+          if (!remoteVideo) {
+            uni.showToast({ title: '无法创建媒体元素', icon: 'none' })
+            isInCall.value = false
+            return
           }
           // #endif
+          // #ifndef H5
+          const localVideo = null
+          const remoteVideo = null
+          const remoteAudio = null
+          // #endif
           
-          await callManager.answerCall(callId, fromUserId, incomingCallType, localVideo, remoteVideo)
+          await callManager.answerCall(callId, fromUserId, incomingCallType, localVideo, remoteVideo, remoteAudio)
+          // 如果是语音来电，接听后主动尝试播放远程音频
+          if (incomingCallType === 'audio') {
+            ensureRemoteAudioPlayingOnH5()
+          }
         } catch (error: any) {
           console.error('接听通话失败:', error)
           uni.showToast({
@@ -2347,6 +2915,33 @@ const tagList = [
   padding: 20rpx;
   color: #999;
   font-size: 24rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.connection-hint {
+  font-size: 22rpx;
+  color: #bbb;
+  max-width: 90%;
+}
+
+.reconnect-btn {
+  margin-top: 8rpx;
+  padding: 12rpx 32rpx;
+  font-size: 26rpx;
+  color: #007aff;
+  background: #e8f4ff;
+  border: 1rpx solid #007aff;
+  border-radius: 8rpx;
+}
+
+.reconnect-btn[disabled] {
+  opacity: 0.6;
+  color: #999;
+  background: #f5f5f5;
+  border-color: #ddd;
 }
 
 .patient-message {
@@ -2534,6 +3129,14 @@ const tagList = [
   gap: 16rpx;
   margin-bottom: 24rpx;
   
+  .doctor-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6rpx;
+    flex-shrink: 0;
+  }
+  
   .doctor-avatar {
     width: 60rpx;
     height: 60rpx;
@@ -2543,7 +3146,15 @@ const tagList = [
     align-items: center;
     justify-content: center;
     font-size: 32rpx;
-    flex-shrink: 0;
+  }
+  
+  .doctor-name {
+    font-size: 22rpx;
+    color: #666;
+    max-width: 120rpx;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -2928,347 +3539,153 @@ const tagList = [
   background-color: #e0e0e0;
   border-color: #4A90E2;
 }
+.video-preview-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  
+  .video-preview-content {
+    width: 90%;
+    max-width: 750rpx;
+    background-color: #000;
+    border-radius: 12rpx;
+    overflow: hidden;
+    position: relative;
+    
+    .video-preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20rpx 30rpx;
+      background-color: rgba(0, 0, 0, 0.7);
+      
+      .video-preview-title {
+        font-size: 32rpx;
+        color: #fff;
+        font-weight: bold;
+      }
+      
+      .video-close-btn {
+        width: 60rpx;
+        height: 60rpx;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 48rpx;
+        color: #fff;
+        cursor: pointer;
+        
+        &:active {
+          opacity: 0.7;
+        }
+      }
+    }
+    
+    .video-player {
+      width: 100%;
+      height: 500rpx;
+      background-color: #000;
+    }
+  }
+}
+
+/* 通话界面样式（与医生端一致的布局与风格，单位改为 rpx 适配移动端） */
+.call-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #000;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.call-content {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 远程视频：填满整个通话区域 */
+.remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+/* 本地视频小窗：右上角悬浮 */
+.local-video {
+  position: absolute;
+  top: 40rpx;
+  right: 40rpx;
+  width: 240rpx;
+  height: 180rpx;
+  border-radius: 20rpx;
+  object-fit: cover;
+  border: 4rpx solid #fff;
+  background: #000;
+  z-index: 10;
+}
+
+.call-controls {
+  position: absolute;
+  bottom: 80rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 40rpx;
+  align-items: center;
+  z-index: 10;
+}
+
+.call-control-btn {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 60rpx;
+  background: rgba(255, 255, 255, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48rpx;
+  cursor: pointer;
+  backdrop-filter: blur(10rpx);
+  
+  &:active {
+    opacity: 0.7;
+    transform: scale(0.95);
+  }
+  
+  &.end-call {
+    background: #f56c6c;
+  }
+}
+
+.call-status {
+  position: absolute;
+  top: 80rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #fff;
+  font-size: 32rpx;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 20rpx 40rpx;
+  border-radius: 40rpx;
+  backdrop-filter: blur(10rpx);
+}
+
 </style>
-
-  }
-  
-  .send-btn {
-    width: 120rpx;
-    height: 72rpx;
-    line-height: 72rpx;
-    border-radius: 36rpx;
-    background-color: #007aff;
-    color: #fff;
-    font-size: 28rpx;
-    padding: 0;
-    
-    &:disabled {
-      background-color: #cccccc;
-      opacity: 0.6;
-    }
-  }
-}
-
-.video-preview-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  
-  .video-preview-content {
-    width: 90%;
-    max-width: 750rpx;
-    background-color: #000;
-    border-radius: 12rpx;
-    overflow: hidden;
-    position: relative;
-    
-    .video-preview-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 20rpx 30rpx;
-      background-color: rgba(0, 0, 0, 0.7);
-      
-      .video-preview-title {
-        font-size: 32rpx;
-        color: #fff;
-        font-weight: bold;
-      }
-      
-      .video-close-btn {
-        width: 60rpx;
-        height: 60rpx;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 48rpx;
-        color: #fff;
-        cursor: pointer;
-        
-        &:active {
-          opacity: 0.7;
-        }
-      }
-    }
-    
-    .video-player {
-      width: 100%;
-      height: 500rpx;
-      background-color: #000;
-    }
-  }
-}
-
-/* 通话界面样式 */
-.call-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: #000;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.call-content {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.remote-video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background: #000;
-}
-
-.local-video {
-  position: absolute;
-  top: 40rpx;
-  right: 40rpx;
-  width: 240rpx;
-  height: 320rpx;
-  border-radius: 20rpx;
-  object-fit: cover;
-  border: 4rpx solid #fff;
-  background: #000;
-  z-index: 10;
-}
-
-.call-controls {
-  position: absolute;
-  bottom: 80rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 40rpx;
-  align-items: center;
-  z-index: 10;
-}
-
-.call-control-btn {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 60rpx;
-  background: rgba(255, 255, 255, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 48rpx;
-  cursor: pointer;
-  backdrop-filter: blur(10rpx);
-  
-  &:active {
-    opacity: 0.7;
-    transform: scale(0.95);
-  }
-  
-  &.end-call {
-    background: #f56c6c;
-  }
-}
-
-.call-status {
-  position: absolute;
-  top: 80rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  color: #fff;
-  font-size: 32rpx;
-  z-index: 10;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 20rpx 40rpx;
-  border-radius: 40rpx;
-  backdrop-filter: blur(10rpx);
-}
-
-
-    background-color: #f5f5f5;
-    border-radius: 36rpx;
-    padding: 0 24rpx;
-    font-size: 28rpx;
-    color: #333;
-    
-    .input-placeholder {
-      color: #999;
-    }
-  }
-  
-  .send-btn {
-    width: 120rpx;
-    height: 72rpx;
-    line-height: 72rpx;
-    border-radius: 36rpx;
-    background-color: #007aff;
-    color: #fff;
-    font-size: 28rpx;
-    padding: 0;
-    
-    &:disabled {
-      background-color: #cccccc;
-      opacity: 0.6;
-    }
-  }
-}
-
-.video-preview-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  
-  .video-preview-content {
-    width: 90%;
-    max-width: 750rpx;
-    background-color: #000;
-    border-radius: 12rpx;
-    overflow: hidden;
-    position: relative;
-    
-    .video-preview-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 20rpx 30rpx;
-      background-color: rgba(0, 0, 0, 0.7);
-      
-      .video-preview-title {
-        font-size: 32rpx;
-        color: #fff;
-        font-weight: bold;
-      }
-      
-      .video-close-btn {
-        width: 60rpx;
-        height: 60rpx;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 48rpx;
-        color: #fff;
-        cursor: pointer;
-        
-        &:active {
-          opacity: 0.7;
-        }
-      }
-    }
-    
-    .video-player {
-      width: 100%;
-      height: 500rpx;
-      background-color: #000;
-    }
-  }
-}
-
-/* 通话界面样式 */
-.call-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: #000;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.call-content {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.remote-video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background: #000;
-}
-
-.local-video {
-  position: absolute;
-  top: 40rpx;
-  right: 40rpx;
-  width: 240rpx;
-  height: 320rpx;
-  border-radius: 20rpx;
-  object-fit: cover;
-  border: 4rpx solid #fff;
-  background: #000;
-  z-index: 10;
-}
-
-.call-controls {
-  position: absolute;
-  bottom: 80rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 40rpx;
-  align-items: center;
-  z-index: 10;
-}
-
-.call-control-btn {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 60rpx;
-  background: rgba(255, 255, 255, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 48rpx;
-  cursor: pointer;
-  backdrop-filter: blur(10rpx);
-  
-  &:active {
-    opacity: 0.7;
-    transform: scale(0.95);
-  }
-  
-  &.end-call {
-    background: #f56c6c;
-  }
-}
-
-.call-status {
-  position: absolute;
-  top: 80rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  color: #fff;
-  font-size: 32rpx;
-  z-index: 10;
-  background: rgba(0, 0, 0, 0.5);
-  padding: 20rpx 40rpx;
-  border-radius: 40rpx;
-  backdrop-filter: blur(10rpx);
-}
-

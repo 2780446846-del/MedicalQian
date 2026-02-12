@@ -78,6 +78,8 @@
 <script>
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import { getCurrentTheme } from '@/utils/theme.js';
+import { post } from '@/utils/api.js';
+import { API_BASE_URL } from '@/utils/config.js';
 // 导入本地存储工具
 import { getAppointmentsByStatus, getAllAppointments as getLocalAllAppointments } from '@/utils/appointmentStorage.js';
 
@@ -301,6 +303,856 @@ export default {
       }
     },
     
+    // 显示支付方式选择弹窗
+    showPaymentOptions(item) {
+      console.log('💳 显示支付方式选择，预约信息:', item);
+      this.selectedItem = item;
+      this.showPaymentModal = true;
+    },
+    
+    // 关闭支付方式选择弹窗
+    closePaymentModal() {
+      this.showPaymentModal = false;
+      this.selectedItem = null;
+      this.paymentMethod = 'alipay'; // 重置为默认支付方式
+    },
+    
+    // 选择支付方式
+    selectPaymentMethod(method) {
+      console.log('✅ 选择支付方式:', method);
+      this.paymentMethod = method;
+    },
+    
+    // 确认支付
+    async confirmPayment() {
+      if (!this.selectedItem) {
+        uni.showToast({
+          title: '请选择要支付的订单',
+          icon: 'none'
+        });
+        return;
+      }
+      
+      // 保存选中的项目和支付方式
+      const item = this.selectedItem;
+      const method = this.paymentMethod;
+      
+      // 关闭弹窗
+      this.closePaymentModal();
+      
+      // 根据选择的支付方式调用对应的支付方法
+      if (method === 'alipay') {
+        await this.goAlipay(item);
+      } else if (method === 'wechat') {
+        await this.goWechatPay(item);
+      } else if (method === 'unionpay') {
+        await this.goUnionpay(item);
+      } else if (method === 'stripe') {
+        await this.goStripe(item);
+      }
+    },
+    
+    // 支付宝支付
+    async goAlipay(item) {
+      console.log('🎯 开始支付宝支付流程');
+      console.log('📦 传入的 item:', item);
+      
+      let loadingShown = false;
+      try {
+        const amount = item.price;
+        console.log('💰 价格金额:', amount);
+        
+        if (!amount) {
+          console.log('❌ 金额无效');
+          uni.showToast({
+            title: '金额无效，无法发起支付',
+            icon: 'none'
+          });
+          return;
+        }
+
+        // 检测是否为移动设备
+        const isMobile = this.isMobileDevice();
+        console.log('📱 设备类型检测:', isMobile ? '移动端' : 'PC端');
+
+        // 移动端提示：将使用PC端支付页面，适配移动浏览器
+        if (isMobile) {
+          uni.showToast({
+            title: '正在打开支付页面...',
+            icon: 'loading',
+            duration: 2000
+          });
+        }
+
+        // 显示加载提示
+        try {
+          uni.showLoading({
+            title: '正在创建支付订单...',
+            mask: true
+          });
+          loadingShown = true;
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
+
+        // 调用后端支付接口
+        // 使用 wap 接口（手机端支付），适配移动端和PC端
+        let res;
+        try {
+          res = await post('/pay/alipay/wap', {
+            appointmentId: item.id || '',
+            subject: `预约${item.doctorName}医生`,
+            totalAmount: amount.toString(),
+            body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
+          }, {
+            showLoading: false // 禁用 api.js 内部的 loading，使用手动控制
+          });
+        } catch (apiError) {
+          // 提取错误信息
+          let errorMsg = apiError?.message || apiError?.data?.message || '创建支付订单失败';
+          
+          // 如果是404错误，提供更友好的提示
+          if (errorMsg.includes('404') || errorMsg.includes('不存在') || errorMsg.includes('Not Found')) {
+            errorMsg = '支付接口不存在，请检查后端服务是否正常运行';
+            console.error('❌ 创建支付订单API调用失败 (404):', apiError);
+            console.error('❌ 请求URL: /pay/alipay/wap');
+            console.error('❌ 请确认后端已实现该接口');
+          } else {
+            console.error('❌ 创建支付订单API调用失败:', apiError);
+          }
+          
+          // 先隐藏loading，再显示错误提示
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+              loadingShown = false;
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+          }
+          
+          uni.showToast({
+            title: errorMsg,
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        }
+        
+        // API调用成功，隐藏loading
+        if (loadingShown) {
+          try {
+            uni.hideLoading();
+            loadingShown = false;
+          } catch (hideError) {
+            // 忽略hideLoading错误
+          }
+        }
+
+        // 检查响应是否成功
+        if (!res) {
+          uni.showToast({
+            title: '创建支付订单失败：服务器无响应',
+            icon: 'none',
+            duration: 2000
+          });
+          return;
+        }
+
+        // 检查是否成功创建订单
+        if (!res.success) {
+          uni.showToast({
+            title: res?.message || '创建支付订单失败',
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        }
+
+        // 检查是否有支付URL
+        if (!res.payUrl) {
+          uni.showToast({
+            title: res?.message || '支付URL无效，请重试',
+            icon: 'none',
+            duration: 2000
+          });
+          return;
+        }
+
+        console.log('✅ 支付订单创建成功');
+        console.log('🔍 完整响应:', res);
+        console.log('🔍 payUrl:', res.payUrl);
+
+        // 验证 payUrl 是否存在
+        if (!res.payUrl || typeof res.payUrl !== 'string') {
+          uni.showToast({
+            title: '支付URL无效，请重试',
+            icon: 'none',
+            duration: 3000
+          });
+          console.error('❌ payUrl 无效:', res.payUrl);
+          return;
+        }
+
+        // 跳转到支付宝支付页面
+        // #ifdef H5
+        try {
+          console.log('🔗 准备跳转到支付页面...');
+          console.log('🔗 payUrl:', res.payUrl);
+          
+          // 在 uni-app H5 环境下，使用 window.location.href 跳转
+          if (typeof window !== 'undefined') {
+            console.log('🔗 使用 window.location.href 跳转');
+            
+            // 直接跳转
+            setTimeout(() => {
+              window.location.href = res.payUrl;
+            }, 200);
+          } else {
+            throw new Error('当前环境不支持 window 对象');
+          }
+        } catch (jumpError) {
+          console.error('❌ 跳转失败:', jumpError);
+          uni.showToast({
+            title: '跳转失败：' + jumpError.message,
+            icon: 'none',
+            duration: 3000
+          });
+        }
+        // #endif
+        
+        // #ifdef APP-PLUS
+        // App环境下，使用 plus.runtime.openURL 打开支付URL
+        try {
+          console.log('📱 App环境：准备打开支付URL...');
+          console.log('🔗 payUrl前200字符:', res.payUrl.substring(0, 200));
+          
+          // 检测是否为沙箱版本
+          const isSandbox = res.payUrl.includes('sandbox') || res.payUrl.includes('alipaydev.com');
+          console.log('🔍 支付环境检测:', isSandbox ? '✅ 沙箱环境' : '⚠️ 正式环境');
+          
+          if (!isSandbox) {
+            console.warn('⚠️ 警告：当前支付URL不是沙箱版本！');
+            uni.showToast({
+              title: '警告：当前不是沙箱环境',
+              icon: 'none',
+              duration: 2000
+            });
+          }
+          
+          // 检查支付URL格式
+          if (!res.payUrl.includes('gateway.do') && !res.payUrl.includes('mobileclientgw')) {
+            uni.showToast({
+              title: '支付URL格式错误',
+              icon: 'none',
+              duration: 3000
+            });
+            console.error('❌ 支付URL格式错误:', res.payUrl);
+            return;
+          }
+          
+          // 使用 plus.runtime.openURL 打开支付URL
+          // 这会尝试打开支付宝APP，如果未安装则打开浏览器
+          if (typeof plus !== 'undefined' && plus.runtime) {
+            plus.runtime.openURL(res.payUrl, (error) => {
+              if (error) {
+                console.error('❌ 打开支付URL失败:', error);
+                uni.showToast({
+                  title: '打开支付失败，请检查是否安装支付宝',
+                  icon: 'none',
+                  duration: 3000
+                });
+                // 备用方案：显示支付URL让用户手动打开
+                this.showPayUrlModal(res.payUrl);
+              } else {
+                console.log('✅ 支付URL已打开');
+              }
+            });
+          } else {
+            console.error('❌ plus.runtime 不可用');
+            uni.showToast({
+              title: '当前环境不支持打开支付',
+              icon: 'none',
+              duration: 3000
+            });
+            this.showPayUrlModal(res.payUrl);
+          }
+        } catch (appError) {
+          console.error('❌ App环境支付失败:', appError);
+          uni.showToast({
+            title: '打开支付失败，请重试',
+            icon: 'none',
+            duration: 3000
+          });
+          this.showPayUrlModal(res.payUrl);
+        }
+        // #endif
+        
+        // #ifdef MP
+        // 小程序环境：提示用户在浏览器中打开
+        uni.showModal({
+          title: '支付提示',
+          content: '小程序暂不支持直接支付，请在浏览器中打开链接完成支付',
+          showCancel: false,
+          confirmText: '知道了'
+        });
+        // #endif
+      } catch (error) {
+        // 确保隐藏loading（防止重复调用）
+        if (loadingShown) {
+          try {
+            uni.hideLoading();
+          } catch (e) {
+            // 忽略hideLoading错误
+          }
+          loadingShown = false;
+        }
+        
+        console.error('❌ 发起支付失败:', error);
+        
+        // 提取更详细的错误信息
+        let errorMsg = '发起支付失败';
+        if (error?.message) {
+          errorMsg = error.message;
+        } else if (error?.data?.message) {
+          errorMsg = error.data.message;
+        } else if (typeof error === 'string') {
+          errorMsg = error;
+        }
+        
+        // 如果是网络错误，提供更友好的提示
+        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
+          errorMsg = '网络连接失败，请检查网络后重试';
+        }
+        
+        uni.showToast({
+          title: errorMsg,
+          icon: 'none',
+          duration: 3000
+        });
+      }
+    },
+    
+    // 微信支付
+    async goWechatPay(item) {
+      console.log('🎯 开始微信支付流程');
+      console.log('📦 传入的 item:', item);
+      
+      let loadingShown = false;
+      try {
+        const amount = item.price;
+        console.log('💰 价格金额:', amount);
+        
+        if (!amount) {
+          console.log('❌ 金额无效');
+          uni.showToast({
+            title: '金额无效，无法发起支付',
+            icon: 'none'
+          });
+          return;
+        }
+
+        // 显示加载提示
+        try {
+          loadingShown = true;
+          uni.showLoading({
+            title: '正在创建微信支付订单...',
+            mask: true
+          });
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
+
+        // 调用后端微信支付接口
+        let res;
+        try {
+          res = await post('/wechatpay/h5', {
+            appointmentId: item.id || '',
+            subject: `预约${item.doctorName}医生`,
+            totalAmount: amount.toString(),
+            body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
+          }, {
+            showLoading: false
+          });
+        } catch (apiError) {
+          const errorMsg = apiError?.message || apiError?.data?.message || '创建微信支付订单失败';
+          console.error('❌ 创建微信支付订单API调用失败:', apiError);
+          
+          uni.showToast({
+            title: errorMsg,
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        } finally {
+          // 确保隐藏loading（无论成功还是失败）
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+            loadingShown = false;
+          }
+        }
+
+        // 检查响应
+        if (!res || !res.success) {
+          uni.showToast({
+            title: res?.message || '创建微信支付订单失败',
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        }
+
+        // 检查支付URL
+        if (!res.payUrl) {
+          uni.showToast({
+            title: '支付URL无效，请重试',
+            icon: 'none',
+            duration: 2000
+          });
+          return;
+        }
+
+        console.log('✅ 微信支付订单创建成功');
+        console.log('🔍 payUrl:', res.payUrl);
+
+        // 跳转到微信支付页面
+        // #ifdef H5
+        try {
+          console.log('🔗 准备跳转到微信支付页面...');
+          
+          if (typeof window !== 'undefined') {
+            console.log('🔗 使用 window.location.href 跳转');
+            setTimeout(() => {
+              window.location.href = res.payUrl;
+            }, 200);
+          } else {
+            throw new Error('当前环境不支持 window 对象');
+          }
+        } catch (jumpError) {
+          console.error('❌ 跳转失败:', jumpError);
+          uni.showToast({
+            title: '跳转失败：' + jumpError.message,
+            icon: 'none',
+            duration: 3000
+          });
+        }
+        // #endif
+        
+        // #ifdef APP-PLUS
+        try {
+          console.log('📱 App环境：准备打开微信支付...');
+          
+          if (typeof plus !== 'undefined' && plus.runtime) {
+            plus.runtime.openURL(res.payUrl, (error) => {
+              if (error) {
+                console.error('❌ 打开微信支付失败:', error);
+                uni.showToast({
+                  title: '打开微信支付失败，请检查是否安装微信',
+                  icon: 'none',
+                  duration: 3000
+                });
+              } else {
+                console.log('✅ 微信支付已打开');
+              }
+            });
+          } else {
+            console.error('❌ plus.runtime 不可用');
+            uni.showToast({
+              title: '当前环境不支持打开支付',
+              icon: 'none',
+              duration: 3000
+            });
+          }
+        } catch (appError) {
+          console.error('❌ App环境微信支付失败:', appError);
+          uni.showToast({
+            title: '打开微信支付失败，请重试',
+            icon: 'none',
+            duration: 3000
+          });
+        }
+        // #endif
+        
+        // #ifdef MP
+        uni.showModal({
+          title: '支付提示',
+          content: '小程序暂不支持直接支付，请在浏览器中打开链接完成支付',
+          showCancel: false,
+          confirmText: '知道了'
+        });
+        // #endif
+      } catch (error) {
+        if (loadingShown) {
+          try {
+            uni.hideLoading();
+          } catch (e) {
+            // 忽略错误
+          }
+          loadingShown = false;
+        }
+        
+        console.error('❌ 发起微信支付失败:', error);
+        
+        let errorMsg = '发起微信支付失败';
+        if (error?.message) {
+          errorMsg = error.message;
+        } else if (error?.data?.message) {
+          errorMsg = error.data.message;
+        } else if (typeof error === 'string') {
+          errorMsg = error;
+        }
+        
+        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
+          errorMsg = '网络连接失败，请检查网络后重试';
+        }
+        
+        uni.showToast({
+          title: errorMsg,
+          icon: 'none',
+          duration: 3000
+        });
+      }
+    },
+    
+    // 银联支付
+    async goUnionpay(item) {
+      console.log('🎯 开始银联支付流程');
+      console.log('📦 传入的 item:', item);
+      
+      let loadingShown = false;
+      try {
+        const amount = item.price;
+        console.log('💰 价格金额:', amount);
+        
+        if (!amount) {
+          console.log('❌ 金额无效');
+          uni.showToast({
+            title: '金额无效，无法发起支付',
+            icon: 'none'
+          });
+          return;
+        }
+
+        // 显示加载提示
+        try {
+          loadingShown = true;
+          uni.showLoading({
+            title: '正在创建银联支付订单...',
+            mask: true
+          });
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
+
+        // 调用后端银联支付接口
+        // 注意：银联支付返回的是HTML表单，需要特殊处理
+        try {
+          const response = await fetch(`${API_BASE_URL}/unionpay/create`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              appointmentId: item.id || '',
+              subject: `预约${item.doctorName}医生`,
+              totalAmount: amount.toString(),
+              body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error('创建银联支付订单失败');
+          }
+
+          // 获取HTML内容
+          const htmlContent = await response.text();
+          
+          console.log('✅ 银联支付订单创建成功');
+
+          // 在当前窗口中打开HTML表单（会自动提交到银联网关）
+          // #ifdef H5
+          try {
+            console.log('🔗 准备跳转到银联支付页面...');
+            
+            if (typeof window !== 'undefined') {
+              // 在当前窗口写入HTML内容，表单会自动提交到银联网关
+              document.open();
+              document.write(htmlContent);
+              document.close();
+            } else {
+              throw new Error('当前环境不支持 window 对象');
+            }
+          } catch (jumpError) {
+            console.error('❌ 跳转失败:', jumpError);
+            uni.showToast({
+              title: '跳转失败：' + jumpError.message,
+              icon: 'none',
+              duration: 3000
+            });
+          }
+          // #endif
+          
+          // #ifdef APP-PLUS
+          uni.showModal({
+            title: '支付提示',
+            content: 'APP环境暂不支持银联支付，请在浏览器中打开',
+            showCancel: false,
+            confirmText: '知道了'
+          });
+          // #endif
+          
+          // #ifdef MP
+          uni.showModal({
+            title: '支付提示',
+            content: '小程序暂不支持银联支付，请在浏览器中打开',
+            showCancel: false,
+            confirmText: '知道了'
+          });
+          // #endif
+        } catch (apiError) {
+          const errorMsg = apiError?.message || '创建银联支付订单失败';
+          console.error('❌ 创建银联支付订单失败:', apiError);
+          
+          uni.showToast({
+            title: errorMsg,
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        } finally {
+          // 确保隐藏loading（无论成功还是失败）
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+            loadingShown = false;
+          }
+        }
+      } catch (error) {
+        if (loadingShown) {
+          try {
+            uni.hideLoading();
+          } catch (e) {
+            // 忽略错误
+          }
+          loadingShown = false;
+        }
+        
+        console.error('❌ 发起银联支付失败:', error);
+        
+        let errorMsg = '发起银联支付失败';
+        if (error?.message) {
+          errorMsg = error.message;
+        } else if (typeof error === 'string') {
+          errorMsg = error;
+        }
+        
+        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
+          errorMsg = '网络连接失败，请检查网络后重试';
+        }
+        
+        uni.showToast({
+          title: errorMsg,
+          icon: 'none',
+          duration: 3000
+        });
+      }
+    },
+    
+    // Stripe 支付
+    async goStripe(item) {
+      console.log('🎯 开始 Stripe 支付流程');
+      console.log('📦 传入的 item:', item);
+      
+      let loadingShown = false;
+      try {
+        const amount = item.price;
+        console.log('💰 价格金额:', amount);
+        
+        if (!amount) {
+          console.log('❌ 金额无效');
+          uni.showToast({
+            title: '金额无效，无法发起支付',
+            icon: 'none'
+          });
+          return;
+        }
+
+        // 显示加载提示
+        try {
+          loadingShown = true;
+          uni.showLoading({
+            title: '正在创建 Stripe 支付...',
+            mask: true
+          });
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
+
+        // 调用后端 Stripe 支付接口
+        let res;
+        try {
+          res = await post('/stripe/create-checkout-session', {
+            appointmentId: item.id || '',
+            subject: `预约${item.doctorName}医生`,
+            totalAmount: amount.toString(),
+            body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
+          }, {
+            showLoading: false
+          });
+        } catch (apiError) {
+          const errorMsg = apiError?.message || apiError?.data?.message || '创建 Stripe 支付失败';
+          console.error('❌ 创建 Stripe 支付API调用失败:', apiError);
+          
+          uni.showToast({
+            title: errorMsg,
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        } finally {
+          // 确保隐藏loading（无论成功还是失败）
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+            loadingShown = false;
+          }
+        }
+
+        // 检查响应
+        if (!res || !res.success) {
+          uni.showToast({
+            title: res?.message || '创建 Stripe 支付失败',
+            icon: 'none',
+            duration: 3000
+          });
+          return;
+        }
+
+        // 检查支付URL
+        if (!res.payUrl) {
+          uni.showToast({
+            title: '支付URL无效，请重试',
+            icon: 'none',
+            duration: 2000
+          });
+          return;
+        }
+
+        console.log('✅ Stripe 支付创建成功');
+        console.log('🔍 payUrl:', res.payUrl);
+
+        // 跳转到 Stripe 支付页面
+        // #ifdef H5
+        try {
+          console.log('🔗 准备跳转到 Stripe 支付页面...');
+          
+          if (typeof window !== 'undefined') {
+            console.log('🔗 使用 window.location.href 跳转');
+            setTimeout(() => {
+              window.location.href = res.payUrl;
+            }, 200);
+          } else {
+            throw new Error('当前环境不支持 window 对象');
+          }
+        } catch (jumpError) {
+          console.error('❌ 跳转失败:', jumpError);
+          uni.showToast({
+            title: '跳转失败：' + jumpError.message,
+            icon: 'none',
+            duration: 3000
+          });
+        }
+        // #endif
+        
+        // #ifdef APP-PLUS
+        try {
+          console.log('📱 App环境：准备打开 Stripe 支付...');
+          
+          if (typeof plus !== 'undefined' && plus.runtime) {
+            plus.runtime.openURL(res.payUrl, (error) => {
+              if (error) {
+                console.error('❌ 打开 Stripe 支付失败:', error);
+                uni.showToast({
+                  title: '打开 Stripe 支付失败',
+                  icon: 'none',
+                  duration: 3000
+                });
+              } else {
+                console.log('✅ Stripe 支付已打开');
+              }
+            });
+          } else {
+            console.error('❌ plus.runtime 不可用');
+            uni.showToast({
+              title: '当前环境不支持打开支付',
+              icon: 'none',
+              duration: 3000
+            });
+          }
+        } catch (appError) {
+          console.error('❌ App环境 Stripe 支付失败:', appError);
+          uni.showToast({
+            title: '打开 Stripe 支付失败，请重试',
+            icon: 'none',
+            duration: 3000
+          });
+        }
+        // #endif
+        
+        // #ifdef MP
+        uni.showModal({
+          title: '支付提示',
+          content: '小程序暂不支持直接支付，请在浏览器中打开链接完成支付',
+          showCancel: false,
+          confirmText: '知道了'
+        });
+        // #endif
+      } catch (error) {
+        if (loadingShown) {
+          try {
+            uni.hideLoading();
+          } catch (e) {
+            // 忽略错误
+          }
+          loadingShown = false;
+        }
+        
+        console.error('❌ 发起 Stripe 支付失败:', error);
+        
+        let errorMsg = '发起 Stripe 支付失败';
+        if (error?.message) {
+          errorMsg = error.message;
+        } else if (error?.data?.message) {
+          errorMsg = error.data.message;
+        } else if (typeof error === 'string') {
+          errorMsg = error;
+        }
+        
+        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
+          errorMsg = '网络连接失败，请检查网络后重试';
+        }
+        
+        uni.showToast({
+          title: errorMsg,
+          icon: 'none',
+          duration: 3000
+        });
+      }
+    }
   }
 };
 </script>
@@ -789,7 +1641,7 @@ export default {
   align-items: center;
   padding: 30rpx 20rpx;
   margin-bottom: 20rpx;
-  background-color: var(--bg-color);
+  background-color: var(--bg-color); 
   border-radius: 16rpx;
   border: 2rpx solid transparent;
   cursor: pointer;

@@ -346,6 +346,10 @@ const getFullFileUrl = (pathStr: string): string => {
   if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('/static/')) return path
   let baseOrigin = API_BASE_URL.replace(/\/api$/, '')
   if (!baseOrigin || baseOrigin === '/' || baseOrigin.startsWith('/')) baseOrigin = 'http://localhost:3000'
+  if (!baseOrigin || baseOrigin === '/' || baseOrigin.startsWith('/')) {
+    baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
+  }
+  
   return `${baseOrigin}${path}`
 }
 

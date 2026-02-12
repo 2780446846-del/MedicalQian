@@ -3,10 +3,19 @@
  * 用于患者端移动应用
  */
 import { SOCKET_URL } from './config.js'
+// App-Plus 真机环境使用 uni-socket.io（支持 Socket.IO 协议）
+// #ifdef APP-PLUS
+import ioApp from '@hyoga/uni-socket.io'
+// #endif
 
 // 配置项：是否启用 Socket.IO 连接
-// 在开发环境下默认关闭，避免后端服务未启动时出现大量错误
-const ENABLE_SOCKET_CONNECTION = true
+// 默认在 H5 环境启用，在 APP-PLUS 环境如果底层实现异常，会自动降级为「仅 HTTP，关闭实时 Socket」
+let ENABLE_SOCKET_CONNECTION = true
+
+// #ifdef APP-PLUS
+// 先假定 APP-PLUS 可以连接，如果初始化过程中发现运行环境不兼容，会在 catch 里做降级处理
+ENABLE_SOCKET_CONNECTION = true
+// #endif
 
 let socketInstance = null
 let isConnected = false
@@ -22,44 +31,85 @@ async function loadSocketIOModule() {
   }
 
   // #ifdef H5
-  try {
-    // 使用动态 import 加载 socket.io-client
-    const socketIOClient = await import('socket.io-client')
-    ioModule = socketIOClient.io || socketIOClient.default || socketIOClient
-    return ioModule
-  } catch (error) {
-    console.error('❌ 加载 socket.io-client 失败:', error)
-    console.error('错误详情:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    })
-    
-    // 提供详细的解决方案
-    const solution = `
+  // 尝试动态导入，如果失败则提供详细的解决方案
+  let retryCount = 0
+  const maxRetries = 2
+  
+  while (retryCount <= maxRetries) {
+    try {
+      if (retryCount > 0) {
+        console.log(`🔄 第 ${retryCount} 次重试加载 socket.io-client...`)
+        // 等待一段时间后重试
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      } else {
+        console.log('🔄 正在加载 socket.io-client...')
+      }
+      
+      // 使用动态 import 加载 socket.io-client
+      // 注意：使用完整的模块路径，避免 Vite 缓存问题
+      const socketIOClient = await import('socket.io-client')
+      ioModule = socketIOClient.io || socketIOClient.default || socketIOClient
+      
+      if (ioModule) {
+        console.log('✅ 成功加载 socket.io-client')
+        return ioModule
+      } else {
+        throw new Error('socket.io-client 模块加载成功但 io 方法不存在')
+      }
+    } catch (error) {
+      retryCount++
+      
+      if (retryCount > maxRetries) {
+        console.error('❌ 加载 socket.io-client 失败（已重试 ' + maxRetries + ' 次）:', error)
+        console.error('错误详情:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name,
+          retryCount: retryCount
+        })
+        
+        // 提供详细的解决方案
+        const solution = `
 无法加载 socket.io-client，请按以下步骤解决：
 
-1. 清除缓存：
+【重要】这是 Vite 动态导入缓存问题，请按顺序执行：
+
+1. 清除所有缓存（必须）：
    - 清除浏览器缓存（Ctrl+Shift+Delete 或 Cmd+Shift+Delete）
    - 删除 unpackage/dist/cache 目录
    - 删除 node_modules/.vite 目录（如果存在）
+   - 删除 node_modules/.cache 目录（如果存在）
 
 2. 重新安装依赖：
+   cd my-uniapp-project
    npm install
 
-3. 重启开发服务器
+3. 完全重启开发服务器：
+   - 完全关闭当前开发服务器（Ctrl+C）
+   - 删除 unpackage/dist 目录（如果存在）
+   - 重新运行: npm run dev:h5
 
 4. 如果问题仍然存在，尝试：
    npm install socket.io-client@latest
+   npm run dev:h5 -- --force
+
+5. 如果还是不行，检查 vite.config.js 或 manifest.json 配置
 
 错误详情: ${error.message}
-    `
-    throw new Error(solution)
+错误类型: ${error.name}
+        `
+        throw new Error(solution)
+      }
+      
+      // 继续重试
+      console.warn(`⚠️ 加载失败，准备重试 (${retryCount}/${maxRetries})...`)
+    }
   }
   // #endif
 
   // #ifndef H5
-  throw new Error('当前环境不支持 Socket.IO，请使用 H5 环境')
+  // 非 H5 环境不走这里（App-Plus 走 uni-socket.io）
+  throw new Error('当前环境不支持 socket.io-client，请在 App-Plus 使用 uni-socket.io')
   // #endif
 }
 
@@ -68,6 +118,14 @@ async function loadSocketIOModule() {
  * @param {string} userId - 用户ID（患者ID）
  * @param {object} userInfo - 用户信息
  */
+/**
+ * 连接成功后立即执行的回调（用于在 resolve 前注册通话监听，避免漏接 offer）
+ */
+let onSocketConnectCallback = null
+export function setOnSocketConnectCallback(cb) {
+  onSocketConnectCallback = cb
+}
+
 export async function connectSocket(userId, userInfo = {}) {
   // 如果已有连接，检查用户ID是否变化
   if (socketInstance && isConnected) {
@@ -111,12 +169,42 @@ export async function connectSocket(userId, userInfo = {}) {
     
     console.log('🔄 正在连接 Socket.IO 服务器...', SOCKET_URL)
 
+    // 临时只使用 polling，避免 WebSocket 握手失败问题
+    // 连接稳定后可以改为 ['polling', 'websocket'] 以启用自动升级
+    const usePollingOnly = true // 设为 false 可以启用 websocket 升级
+    
     socketInstance = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      // Socket.IO 路径（必须与服务器配置一致）
+      path: '/socket.io/',
+      
+      // 传输方式：先使用 polling，避免 WebSocket 握手失败
+      transports: usePollingOnly ? ['polling'] : ['polling', 'websocket'],
+      
+      // 自动重连配置
       reconnection: true,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
       reconnectionAttempts: 5,
-      timeout: 20000
+      
+      // 连接超时（毫秒）
+      timeout: 20000,
+      
+      // 允许升级传输方式（从 polling 升级到 websocket）
+      upgrade: !usePollingOnly,
+      
+      // 强制使用新连接，避免使用缓存的失败连接
+      forceNew: true,
+      
+      // 记住传输方式偏好
+      rememberUpgrade: false
+    })
+    
+    console.log('🔧 Socket.IO 连接配置:', {
+      url: SOCKET_URL,
+      path: '/socket.io/',
+      transports: usePollingOnly ? ['polling'] : ['polling', 'websocket'],
+      upgrade: !usePollingOnly,
+      forceNew: true
     })
 
     return new Promise((resolve, reject) => {
@@ -132,6 +220,15 @@ export async function connectSocket(userId, userInfo = {}) {
           userInfo
         })
 
+        // 在 resolve 前执行回调（如注册通话信令监听），避免 offer 先到被丢弃
+        if (typeof onSocketConnectCallback === 'function') {
+          try {
+            onSocketConnectCallback()
+          } catch (e) {
+            console.warn('⚠️ onSocketConnectCallback 执行失败:', e)
+          }
+        }
+
         resolve(socketInstance)
       })
 
@@ -144,9 +241,31 @@ export async function connectSocket(userId, userInfo = {}) {
       // 连接错误
       socketInstance.on('connect_error', (error) => {
         console.error('❌ Socket.IO 连接错误:', error)
+        console.error('错误类型:', error.type)
+        console.error('错误描述:', error.description)
+        console.error('错误消息:', error.message)
+        console.error('连接URL:', SOCKET_URL)
+        console.error('当前传输方式:', socketInstance.io?.engine?.transport?.name || 'unknown')
         isConnected = false
         reject(error)
       })
+      
+      // 监听传输方式变化
+      socketInstance.on('upgrade', () => {
+        console.log('🔄 Socket.IO 传输方式已升级到 WebSocket')
+        console.log('📡 当前传输方式:', socketInstance.io?.engine?.transport?.name || 'unknown')
+      })
+      
+      // 监听连接尝试
+      if (socketInstance.io) {
+        socketInstance.io.on('open', () => {
+          console.log('🔄 Socket.IO 开始连接尝试...')
+        })
+        
+        socketInstance.io.on('error', (error) => {
+          console.error('❌ Socket.IO IO 错误:', error)
+        })
+      }
 
       // 断开连接
       socketInstance.on('disconnect', (reason) => {
@@ -170,6 +289,15 @@ export async function connectSocket(userId, userInfo = {}) {
           userId,
           userInfo
         })
+
+        // 重新注册通话信令监听（重连后 socket 可能变，需重新绑定）
+        if (typeof onSocketConnectCallback === 'function') {
+          try {
+            onSocketConnectCallback()
+          } catch (e) {
+            console.warn('⚠️ onSocketConnectCallback(reconnect) 执行失败:', e)
+          }
+        }
       })
 
       // 重连失败
@@ -180,13 +308,86 @@ export async function connectSocket(userId, userInfo = {}) {
     })
     // #endif
 
+    // #ifdef APP-PLUS
+    // App-Plus 真机环境使用 uni-socket.io（内部基于 uni.connectSocket）
+    console.log('🔄 [APP-PLUS] 正在连接 Socket.IO 服务器...', SOCKET_URL)
+
+    // 仅使用 websocket 容易在部分网络/设备上握手失败，改为先 polling 再升级 websocket
+    const useWebsocketOnly = false
+    socketInstance = ioApp(SOCKET_URL, {
+      path: '/socket.io/',
+      transports: useWebsocketOnly ? ['websocket'] : ['polling', 'websocket'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 10,
+      timeout: 20000,
+      forceNew: true,
+      rememberUpgrade: false
+    })
+
+    return new Promise((resolve, reject) => {
+      socketInstance.on('connect', () => {
+        console.log('✅ [APP-PLUS] Socket.IO 连接成功:', socketInstance.id)
+        isConnected = true
+        currentUserId = userId
+
+        socketInstance.emit('user:online', { userId, userInfo })
+        resolve(socketInstance)
+      })
+
+      socketInstance.on('connect_error', (error) => {
+        console.error('❌ [APP-PLUS] Socket.IO 连接错误:', error)
+        isConnected = false
+        reject(error)
+      })
+
+      socketInstance.on('disconnect', (reason) => {
+        console.log('⚠️ [APP-PLUS] Socket.IO 断开连接:', reason)
+        isConnected = false
+      })
+
+      socketInstance.on('reconnect', (attemptNumber) => {
+        console.log(`✅ [APP-PLUS] 重连成功 (尝试 ${attemptNumber} 次)`)
+        isConnected = true
+        currentUserId = userId
+        socketInstance.emit('user:online', { userId, userInfo })
+      })
+
+      socketInstance.on('reconnect_failed', () => {
+        console.error('❌ [APP-PLUS] 重连失败')
+        isConnected = false
+      })
+    })
+    // #endif
+
     // #ifndef H5
-    // App 和小程序环境需要使用原生 WebSocket 或第三方插件
-    throw new Error('当前环境不支持 Socket.IO，请使用 H5 环境或安装原生插件')
+    // 其它端（小程序等）暂不支持
+    throw new Error('当前环境暂未实现 Socket.IO，请使用 H5 或 App-Plus')
     // #endif
 
   } catch (error) {
     console.error('❌ 初始化 Socket.IO 失败:', error)
+
+    // 在 APP-PLUS 环境下，如果底层实现由于环境原因（如 document/DOM 不存在）报错，
+    // 则降级为「关闭 Socket 实时功能，仅保留 HTTP」，避免整个页面崩溃。
+    // 这里不再把错误抛到上层，而是返回一个“空实现”的 socketInstance。
+    // #ifdef APP-PLUS
+    console.warn('⚠️ [APP-PLUS] Socket.IO 初始化失败，已降级为无实时连接模式（仅 HTTP 轮询）。')
+    socketInstance = {
+      connected: false,
+      id: 'mock_app_socket_id',
+      on() {},
+      off() {},
+      emit() {},
+      disconnect() {}
+    }
+    isConnected = false
+    currentUserId = userId || null
+    return socketInstance
+    // #endif
+
+    // 其它平台仍然抛出错误，保持原有行为
     throw error
   }
 }
@@ -701,7 +902,10 @@ export function onCallStatusChange(callback) {
     'call:accepted': (data) => callback({ type: 'accepted', ...data }),
     'call:rejected': (data) => callback({ type: 'rejected', ...data }),
     'call:ended': (data) => callback({ type: 'ended', ...data }),
-    'call:offer': (data) => callback({ type: 'offer', ...data }),
+    'call:offer': (data) => {
+      console.log('📥 [患者端-Socket] 收到 call:offer', { callId: data?.callId, hasOffer: !!data?.offer, fromUserId: data?.fromUserId });
+      callback({ type: 'offer', ...data });
+    },
     'call:answer': (data) => callback({ type: 'answer', ...data }),
     'call:ice-candidate': (data) => callback({ type: 'ice-candidate', ...data })
   };
@@ -709,6 +913,7 @@ export function onCallStatusChange(callback) {
   Object.keys(handlers).forEach(event => {
     socketInstance.on(event, handlers[event]);
   });
+  console.log('✅ [患者端-Socket] 已注册通话信令监听 (含 call:offer)');
 
   // 返回清理函数
   return () => {

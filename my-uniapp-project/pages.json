@@ -418,10 +418,14 @@
       }
     },
     {
-      "path": "pages/web-view/index",
+      "path": "pages/online-consult/trtc-call",
       "style": {
         "navigationBarTitleText": "网页导航",
         "backgroundColor": "#ffffff"
+        "navigationBarTitleText": "视频通话",
+        "navigationBarBackgroundColor": "#1a1a2e",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#1a1a2e"
       }
     }
   ],
