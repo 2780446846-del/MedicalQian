@@ -133,7 +133,16 @@ export function request(options) {
         } else {
           handleError(res, showError)
           // 尝试从响应数据中提取错误信息
-          const errorMessage = res.data?.message || res.data?.error || `请求失败: ${res.statusCode}`
+          let errorMessage = res.data?.message || res.data?.error || `请求失败: ${res.statusCode}`
+          
+          // 对于404错误，提供更详细的错误信息
+          if (res.statusCode === 404) {
+            const requestUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`
+            errorMessage = `接口不存在 (404): ${requestUrl}`
+            console.error('❌ 404错误 - 请求URL:', requestUrl)
+            console.error('❌ 请检查：1. 后端服务是否正常运行 2. 接口路径是否正确 3. 路由配置是否正确')
+          }
+          
           reject(new Error(errorMessage))
         }
       },
