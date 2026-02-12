@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { get, post, del, put } from '@/utils/request'
+import { sendVoiceNotify, getPatientAppointment } from '@/api/voiceNotify'
 import { useAuthStore } from '@/stores/auth'
 import * as echarts from 'echarts'
 import { use } from 'echarts/core'
@@ -169,6 +170,19 @@ const activeActionMenu = ref<string | null>(null)
 const showCallDialog = ref(false)
 const callPatient = ref<Patient | null>(null)
 
+// 语音通知对话框
+const showNotifyDialog = ref(false)
+const notifyPatient = ref<Patient | null>(null)
+const notifyLoading = ref(false)
+const notifyForm = ref({
+  doctorName: '',
+  department: '',
+  appointmentTime: '',
+  clinicLocation: '',
+  requiredDocuments: '身份证和医保卡',
+  hospitalName: ''
+})
+
 // 提示消息
 const showToast = ref(false)
 const toastMessage = ref('')
@@ -282,7 +296,7 @@ async function fetchPatients() {
       patients.value = patientsData
       total.value = response.count || 0
       totalPages.value = response.totalPages || Math.ceil(total.value / pageSize.value)
-      
+
       // 计算统计数据（异步，会获取所有患者数据）
       await calculateStatistics(patientsData)
     } else {
@@ -418,11 +432,11 @@ async function batchDelete() {
     alert('请至少选择一个患者')
     return
   }
-  
+
   if (!confirm(`确定要删除选中的 ${selectedPatients.value.length} 个患者吗？`)) {
     return
   }
-  
+
   try {
     let successCount = 0
     for (const id of selectedPatients.value) {
@@ -433,7 +447,7 @@ async function batchDelete() {
         console.error(`删除患者失败 (${id}):`, error)
       }
     }
-    
+
     showToastMessage(`成功删除 ${successCount}/${selectedPatients.value.length} 个患者`)
     selectedPatients.value = []
     isSelectMode.value = false
@@ -450,7 +464,7 @@ function exportData() {
     alert('暂无数据可导出')
     return
   }
-  
+
   // 准备导出数据
   const exportData = patients.value.map(patient => ({
     患者姓名: patient.name || '-',
@@ -462,7 +476,7 @@ function exportData() {
     治疗方案: patient.treatmentPlan || '-',
     支付状态: patient.paymentStatus || '-'
   }))
-  
+
   // 转换为CSV格式
   const headers = ['患者姓名', '性别', '年龄', '电话', '住址', '患者类别', '治疗方案', '支付状态']
   const csvContent = [
@@ -476,7 +490,7 @@ function exportData() {
       return `"${value}"`
     }).join(','))
   ].join('\n')
-  
+
   // 创建Blob并下载
   const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
@@ -488,7 +502,7 @@ function exportData() {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
-  
+
   showToastMessage('数据导出成功！')
 }
 
@@ -519,7 +533,7 @@ const visiblePages = computed(() => {
   const pages: (number | string)[] = []
   const total = totalPages.value
   const current = currentPage.value
-  
+
   if (total <= 7) {
     // 如果总页数少于等于7页，显示所有页码
     for (let i = 1; i <= total; i++) {
@@ -528,7 +542,7 @@ const visiblePages = computed(() => {
   } else {
     // 总是显示第一页
     pages.push(1)
-    
+
     if (current <= 4) {
       // 当前页在前4页
       for (let i = 2; i <= 5; i++) {
@@ -552,7 +566,7 @@ const visiblePages = computed(() => {
       pages.push(total)
     }
   }
-  
+
   return pages
 })
 
@@ -589,21 +603,21 @@ function handleAvatarSelect(event: Event) {
   const input = event.target as HTMLInputElement
   if (input.files && input.files[0]) {
     const file = input.files[0]
-    
+
     // 检查文件大小（2MB）
     if (file.size > 2 * 1024 * 1024) {
       alert('图片大小不能超过2MB')
       return
     }
-    
+
     // 检查文件类型
     if (!file.type.startsWith('image/')) {
       alert('请选择图片文件')
       return
     }
-    
+
     avatarFile.value = file
-    
+
     // 创建预览
     const reader = new FileReader()
     reader.onload = (e) => {
@@ -619,7 +633,7 @@ function removeAvatar() {
   avatarPreview.value = ''
   avatarFile.value = null
   patientForm.value.avatar = ''
-  
+
   // 重置文件输入
   const fileInput = document.getElementById('avatar-input') as HTMLInputElement
   if (fileInput) {
@@ -632,7 +646,7 @@ async function uploadAvatarToServer(): Promise<string | null> {
   if (!avatarFile.value) {
     return patientForm.value.avatar || null
   }
-  
+
   uploadingAvatar.value = true
   try {
     // 将文件转换为base64（简化处理，实际项目中应该上传到服务器）
@@ -673,7 +687,7 @@ async function createPatient() {
         avatarUrl = uploaded
       }
     }
-    
+
     // 不手动设置id，让MongoDB自动生成_id
     const patientData = {
       ...patientForm.value,
@@ -735,7 +749,7 @@ async function updatePatient() {
         avatarUrl = uploaded
       }
     }
-    
+
     const patientId = editingPatient.value._id || editingPatient.value.id
     if (!patientId) {
       alert('患者ID不存在，无法更新')
@@ -774,7 +788,7 @@ async function updatePatient() {
 async function deletePatient(patient: Patient) {
   // 关闭操作菜单
   activeActionMenu.value = null
-  
+
   if (!confirm(`确定要删除患者 "${patient.name}" 吗？此操作无法撤销。`)) {
     return
   }
@@ -823,7 +837,7 @@ function closeActionMenu() {
 // 处理操作菜单项点击
 function handleActionMenuClick(patient: Patient, action: string) {
   closeActionMenu()
-  
+
   if (action === 'detail') {
     // 查看详情
     openPatientDetail(patient)
@@ -834,6 +848,9 @@ function handleActionMenuClick(patient: Patient, action: string) {
   } else if (action === 'call') {
     // 拨打电话功能
     handleCallPatient(patient)
+  } else if (action === 'notify') {
+    // 语音通知功能
+    handleNotifyPatient(patient)
   }
 }
 
@@ -858,9 +875,9 @@ function closePatientDetail() {
 // 处理详情页面的操作
 function handleDetailAction(action: string) {
   if (!selectedPatient.value) return
-  
+
   closePatientDetail()
-  
+
   if (action === 'edit') {
     editPatient(selectedPatient.value)
   } else if (action === 'call') {
@@ -888,9 +905,88 @@ function handleCallPatient(patient: Patient) {
     alert('该患者未填写电话号码')
     return
   }
-  
+
   callPatient.value = patient
   showCallDialog.value = true
+}
+
+// 处理语音通知
+async function handleNotifyPatient(patient: Patient) {
+  if (!patient.phone) {
+    alert('该患者未填写电话号码，无法发送语音通知')
+    return
+  }
+
+  notifyPatient.value = patient
+  // 重置表单
+  notifyForm.value = {
+    doctorName: '',
+    department: '',
+    appointmentTime: '',
+    clinicLocation: '',
+    requiredDocuments: '身份证和医保卡',
+    hospitalName: ''
+  }
+
+  // 尝试自动填充预约信息
+  try {
+    const patientId = patient._id || patient.id || ''
+    if (patientId) {
+      const res = await getPatientAppointment(patientId)
+      if (res?.success && res?.data) {
+        const appt = res.data
+        notifyForm.value.doctorName = appt.doctorName || ''
+        notifyForm.value.department = appt.department || ''
+        notifyForm.value.appointmentTime = appt.date ? `${appt.date} ${appt.time || ''}`.trim() : ''
+        notifyForm.value.clinicLocation = appt.clinicLocation || ''
+      }
+    }
+  } catch (e) {
+    console.log('自动填充预约信息失败，使用手动输入', e)
+  }
+
+  showNotifyDialog.value = true
+}
+
+// 执行语音通知发送
+async function executeVoiceNotify() {
+  if (!notifyPatient.value) return
+
+  notifyLoading.value = true
+  try {
+    const patientId = notifyPatient.value._id || notifyPatient.value.id || ''
+    const res = await sendVoiceNotify({
+      patientId,
+      patientName: notifyPatient.value.name || '',
+      phone: notifyPatient.value.phone || '',
+      doctorName: notifyForm.value.doctorName,
+      department: notifyForm.value.department,
+      appointmentTime: notifyForm.value.appointmentTime,
+      clinicLocation: notifyForm.value.clinicLocation,
+      requiredDocuments: notifyForm.value.requiredDocuments,
+      hospitalName: notifyForm.value.hospitalName
+    })
+
+    if (res?.success) {
+      showNotifyDialog.value = false
+      notifyPatient.value = null
+      showToastMessage(res.message || '语音通知发送成功！')
+    } else {
+      alert(res?.message || '发送失败，请重试')
+    }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : '发送失败，请稍后重试'
+    alert('语音通知发送失败：' + msg)
+  } finally {
+    notifyLoading.value = false
+  }
+}
+
+// 关闭语音通知对话框
+function closeNotifyDialog() {
+  if (notifyLoading.value) return
+  showNotifyDialog.value = false
+  notifyPatient.value = null
 }
 
 // 显示提示消息
@@ -907,19 +1003,19 @@ async function executeCall() {
   if (!callPatient.value || !callPatient.value.phone) {
     return
   }
-  
+
   const phone = callPatient.value.phone.trim()
-  
+
   // 检测是否是移动设备
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-  
+
   if (isMobile) {
     // 移动设备：直接使用tel:协议拨打电话
     // 先关闭对话框，然后立即拨打
     showCallDialog.value = false
     const patientName = callPatient.value.name
     callPatient.value = null
-    
+
     // 使用 setTimeout 确保对话框关闭后再执行拨号
     setTimeout(() => {
       window.location.href = `tel:${phone}`
@@ -944,7 +1040,7 @@ async function executeCall() {
         textArea.select()
         const success = document.execCommand('copy')
         document.body.removeChild(textArea)
-        
+
         if (success) {
           showCallDialog.value = false
           callPatient.value = null
@@ -970,9 +1066,9 @@ async function copyPhoneNumber() {
   if (!callPatient.value || !callPatient.value.phone) {
     return
   }
-  
+
   const phone = callPatient.value.phone.trim()
-  
+
   try {
     await navigator.clipboard.writeText(phone)
     showToastMessage('电话号码已复制到剪贴板！')
@@ -988,7 +1084,7 @@ async function copyPhoneNumber() {
       textArea.select()
       const success = document.execCommand('copy')
       document.body.removeChild(textArea)
-      
+
       if (success) {
         showToastMessage('电话号码已复制到剪贴板！')
       } else {
@@ -1015,12 +1111,12 @@ function handleClickOutside(event: MouseEvent) {
     showMessages.value = false
     showUserMenu.value = false
   }
-  
+
   // 关闭操作菜单
   if (!target.closest('.action-menu-wrapper')) {
     closeActionMenu()
   }
-  
+
   // 关闭筛选菜单
   if (!target.closest('.filter-dropdown') && !target.closest('.filter-btn')) {
     closeFilterMenu()
@@ -1032,7 +1128,7 @@ function handleClickOutside(event: MouseEvent) {
 async function calculateStatistics(patientsData: Patient[]) {
   // 获取实际患者总数（从total字段，而不是当前页数据）
   const actualTotal = total.value || patientsData.length
-  
+
   if (actualTotal > 0) {
     totalPatients.value = actualTotal
     localPatients.value = Math.floor(actualTotal * 0.75)
@@ -1045,11 +1141,11 @@ async function calculateStatistics(patientsData: Patient[]) {
     nonLocalPatients.value = 0
     appointmentCount.value = 0
   }
-  
+
   // 计算趋势（实际应该对比历史数据，如果没有数据则为0）
   patientTrend.value = 0
   appointmentTrend.value = 0
-  
+
   // 计算地区分布 - 使用所有患者数据，而不是当前页数据
   if (actualTotal > 0) {
     // 获取所有患者数据用于统计
@@ -1063,7 +1159,7 @@ async function calculateStatistics(patientsData: Patient[]) {
   } else {
     patientLocationData.value = []
   }
-  
+
   // 更新图表
   nextTick(() => {
     updateCharts()
@@ -1078,7 +1174,7 @@ function initCharts() {
   if (lineChartRef.value && !lineChart) {
     lineChart = echarts.init(lineChartRef.value)
   }
-  
+
   // 延迟更新图表，确保DOM已完全渲染
   setTimeout(() => {
     updateCharts()
@@ -1126,7 +1222,7 @@ const barChartOption = ref({
     axisLine: { show: false },
     axisTick: { show: false },
     axisLabel: { fontSize: 12, color: '#666' },
-    splitLine: { 
+    splitLine: {
       lineStyle: { color: '#f0f0f0' },
       show: true
     },
@@ -1172,7 +1268,7 @@ const lineChartOption = ref({
     axisLine: { show: false },
     axisTick: { show: false },
     axisLabel: { fontSize: 12, color: '#666' },
-    splitLine: { 
+    splitLine: {
       lineStyle: { color: '#f0f0f0' },
       show: true
     },
@@ -1243,30 +1339,30 @@ const provinceBar2DOption = computed(() => {
     xAxis: {
       type: 'category',
       data: topProvinceData.value.map(item => item.name),
-      axisLine: { 
+      axisLine: {
         show: isTechMode,
         lineStyle: { color: isTechMode ? '#00ff00' : undefined }
       },
       axisTick: { show: false },
-      axisLabel: { 
-        fontSize: 12, 
+      axisLabel: {
+        fontSize: 12,
         color: isTechMode ? '#00ff00' : '#666',
         rotate: 45
       }
     },
     yAxis: {
       type: 'value',
-      axisLine: { 
+      axisLine: {
         show: isTechMode,
         lineStyle: { color: isTechMode ? '#00ff00' : undefined }
       },
       axisTick: { show: false },
-      axisLabel: { 
-        fontSize: 12, 
+      axisLabel: {
+        fontSize: 12,
         color: isTechMode ? '#00ff00' : '#666'
       },
-      splitLine: { 
-        lineStyle: { 
+      splitLine: {
+        lineStyle: {
           color: isTechMode ? 'rgba(0, 255, 0, 0.2)' : '#f0f0f0'
         }
       }
@@ -1276,7 +1372,7 @@ const provinceBar2DOption = computed(() => {
       type: 'bar',
       barWidth: '60%',
       itemStyle: {
-        color: isTechMode 
+        color: isTechMode
           ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: '#00ff00' },
               { offset: 1, color: '#003300' }
@@ -1338,30 +1434,30 @@ const provinceBar3DOption = computed(() => {
     xAxis: {
       type: 'category',
       data: topProvinceData.value.map(item => item.name),
-      axisLine: { 
+      axisLine: {
         show: isTechMode,
         lineStyle: { color: isTechMode ? '#00ff00' : undefined }
       },
       axisTick: { show: false },
-      axisLabel: { 
-        fontSize: 12, 
+      axisLabel: {
+        fontSize: 12,
         color: isTechMode ? '#00ff00' : '#666',
         rotate: 45
       }
     },
     yAxis: {
       type: 'value',
-      axisLine: { 
+      axisLine: {
         show: isTechMode,
         lineStyle: { color: isTechMode ? '#00ff00' : undefined }
       },
       axisTick: { show: false },
-      axisLabel: { 
-        fontSize: 12, 
+      axisLabel: {
+        fontSize: 12,
         color: isTechMode ? '#00ff00' : '#666'
       },
-      splitLine: { 
-        lineStyle: { 
+      splitLine: {
+        lineStyle: {
           color: isTechMode ? 'rgba(0, 255, 0, 0.2)' : '#f0f0f0'
         }
       }
@@ -1566,19 +1662,19 @@ function initProvinceCharts() {
     provinceBar2DChart = echarts.init(provinceBar2DRef.value)
     provinceBar2DChart.setOption(provinceBar2DOption.value)
   }
-  
+
   // 3D柱状图
   if (provinceBar3DRef.value && !provinceBar3DChart) {
     provinceBar3DChart = echarts.init(provinceBar3DRef.value)
     provinceBar3DChart.setOption(provinceBar3DOption.value)
   }
-  
+
   // 2D饼图
   if (provincePie2DRef.value && !provincePie2DChart) {
     provincePie2DChart = echarts.init(provincePie2DRef.value)
     provincePie2DChart.setOption(provincePie2DOption.value)
   }
-  
+
   // 3D饼图
   if (provincePie3DRef.value && !provincePie3DChart) {
     provincePie3DChart = echarts.init(provincePie3DRef.value)
@@ -1618,12 +1714,12 @@ function toggleViewMode() {
 function updateCharts() {
   // 更新柱状图配置（用于数据大屏）
   if (barChartOption.value && barChartOption.value.series && barChartOption.value.series[0]) {
-    const patientData = patientTrend.value > 0 
+    const patientData = patientTrend.value > 0
       ? [120, 140, 160, 180, 200, 220, 240]
       : [240, 220, 200, 180, 160, 140, 120]
     barChartOption.value.series[0].data = patientData
   }
-  
+
   // 更新折线图配置（用于数据大屏）
   if (lineChartOption.value && lineChartOption.value.series && lineChartOption.value.series[0]) {
     const appointmentData = appointmentTrend.value > 0
@@ -1631,7 +1727,7 @@ function updateCharts() {
       : [320, 280, 220, 180, 150, 120, 100]
     lineChartOption.value.series[0].data = appointmentData
   }
-  
+
   // 保留原有的图表更新逻辑（如果还在使用）
   if (barChart && barChartRef.value) {
     const option = {
@@ -1665,7 +1761,7 @@ function updateCharts() {
     }
     barChart.setOption(option)
   }
-  
+
   // 更新折线图（预约趋势）
   if (lineChart && lineChartRef.value) {
     const option = {
@@ -1791,13 +1887,13 @@ async function fetchAllPatientsForStats() {
       success: boolean
       data: Patient[]
       count: number
-    }>('/patients', { 
-      data: { 
-        page: 1, 
+    }>('/patients', {
+      data: {
+        page: 1,
         pageSize: 10000 // 获取足够多的数据
-      } 
+      }
     })
-    
+
     if (response.success && response.data) {
       return response.data
     }
@@ -1818,7 +1914,7 @@ function calculateLocationDistribution(patientsData: Patient[]) {
     '上海市': '上海', '上海': '上海',
     '天津市': '天津', '天津': '天津',
     '重庆市': '重庆', '重庆': '重庆',
-    
+
     // 省份 - 按完整名称优先
     '广东省': '广东', '广东': '广东', '广州': '广东', '深圳': '广东', '珠海': '广东', '佛山': '广东', '东莞': '广东', '中山': '广东', '惠州': '广东', '江门': '广东', '肇庆': '广东', '汕头': '广东', '潮州': '广东', '揭阳': '广东', '汕尾': '广东', '湛江': '广东', '茂名': '广东', '阳江': '广东', '韶关': '广东', '清远': '广东', '云浮': '广东', '梅州': '广东', '河源': '广东',
     '浙江省': '浙江', '浙江': '浙江', '杭州': '浙江', '宁波': '浙江', '温州': '浙江', '嘉兴': '浙江', '湖州': '浙江', '绍兴': '浙江', '金华': '浙江', '衢州': '浙江', '舟山': '浙江', '台州': '浙江', '丽水': '浙江',
@@ -1851,40 +1947,40 @@ function calculateLocationDistribution(patientsData: Patient[]) {
     '香港特别行政区': '香港', '香港': '香港',
     '澳门特别行政区': '澳门', '澳门': '澳门'
   }
-  
+
   // 统计各省份患者数量
   const provinceCount: Record<string, number> = {}
-  
+
   patientsData.forEach(patient => {
     if (!patient.address) return
-    
+
     const address = patient.address.trim()
     let matchedProvince = ''
-    
+
     // 优先匹配完整的省份名称（带"省"、"市"、"自治区"等）
     // 按长度排序，优先匹配更长的关键词
     const sortedKeys = Object.keys(provinceMap).sort((a, b) => b.length - a.length)
-    
+
     for (const key of sortedKeys) {
       if (address.includes(key)) {
         matchedProvince = provinceMap[key] || ''
         break
       }
     }
-    
+
     // 如果匹配到了省份，统计
     if (matchedProvince) {
       provinceCount[matchedProvince] = (provinceCount[matchedProvince] || 0) + 1
     }
     // 如果没有匹配到，跳过该患者（不统计），避免数据不准确
   })
-  
+
   // 转换为echarts需要的格式
   patientLocationData.value = Object.entries(provinceCount).map(([name, value]) => ({
     name,
     value
   }))
-  
+
   // 如果没有数据，生成示例数据
   if (patientLocationData.value.length === 0) {
     const exampleProvinces = [
@@ -1942,12 +2038,12 @@ onMounted(async () => {
     isDark.value = true
     document.documentElement.classList.add('dark')
   }
-  
+
   // 检查是否有编辑参数（从详情页跳转过来）
   if (route.query.edit) {
     const editId = route.query.edit as string
     const patientData = route.query.patient as string
-    
+
     // 如果有患者数据，直接使用
     if (patientData) {
       try {
@@ -1959,26 +2055,26 @@ onMounted(async () => {
     } else {
       // 否则从列表中查找
       await fetchPatients()
-      const foundPatient = patients.value.find((p: Patient) => 
+      const foundPatient = patients.value.find((p: Patient) =>
         (p._id && p._id === editId) || (p.id && p.id === editId)
       )
       if (foundPatient) {
         editPatient(foundPatient)
       }
     }
-    
+
     // 清除query参数
     router.replace({ path: '/patients', query: {} })
   } else {
     // 正常加载患者列表
     fetchPatients()
   }
-  
+
   // 添加点击外部关闭菜单的监听
   document.addEventListener('click', handleClickOutside)
   window.addEventListener('resize', handleResize)
   document.addEventListener('keydown', handleEscKey)
-  
+
   // 首先初始化地图数据（确保地图始终显示）
   if (patientLocationData.value.length === 0) {
     const exampleStates = [
@@ -2033,10 +2129,10 @@ onMounted(async () => {
     ]
     patientLocationData.value = exampleStates
   }
-  
+
   // 先尝试获取数据
   await fetchPatients()
-  
+
   // 如果没有数据，添加示例数据
   if (patients.value.length === 0) {
     console.log('📝 未找到患者数据，添加示例数据...')
@@ -2045,10 +2141,10 @@ onMounted(async () => {
     // 如果有真实数据，重新计算地区分布
     calculateLocationDistribution(patients.value)
   }
-  
+
   // 计算统计数据
   calculateStatistics(patients.value)
-  
+
   // 初始化图表
   await nextTick()
   initCharts()
@@ -2125,24 +2221,24 @@ async function addExamplePatients() {
       paymentStatus: '已支付'
     }
   ]
-  
+
   // 批量创建示例患者（添加延迟避免ID冲突）
   let successCount = 0
   for (let i = 0; i < examplePatients.length; i++) {
     try {
       await new Promise(resolve => setTimeout(resolve, 200 * i)) // 延迟200ms * i
-      
+
       // 不手动设置id，让MongoDB自动生成_id
       const patientData = {
         ...examplePatients[i]
       }
-      
+
       const response = await post<{
         success: boolean
         message: string
         data: Patient
       }>('/patients', patientData)
-      
+
       if (response.success) {
         successCount++
         console.log(`✅ 创建患者成功: ${patientData.name}`)
@@ -2153,9 +2249,9 @@ async function addExamplePatients() {
       // 继续尝试创建下一个患者
     }
   }
-  
+
   console.log(`📊 成功创建 ${successCount}/${examplePatients.length} 个示例患者`)
-  
+
   // 重新获取数据
   if (successCount > 0) {
     await fetchPatients()
@@ -2180,22 +2276,22 @@ async function add14Patients() {
     { name: '朱丽', gender: '女', age: 38, phone: '13800138013', idCard: '110101198503224578', relation: '本人', address: '西安市雁塔区小寨东路126号', category: '成年人', treatmentPlan: '门诊', paymentStatus: '已支付' },
     { name: '胡强', gender: '男', age: 26, phone: '13800138014', idCard: '110101199708038901', relation: '本人', address: '南京市鼓楼区中山路321号', category: '成年人', treatmentPlan: '住院', paymentStatus: '部分支付' }
   ]
-  
+
   let successCount = 0
   for (let i = 0; i < patients.length; i++) {
     try {
       await new Promise(resolve => setTimeout(resolve, 200 * i)) // 延迟200ms * i
-      
+
       const patientData = {
         ...patients[i]
       }
-      
+
       const response = await post<{
         success: boolean
         message: string
         data: Patient
       }>('/patients', patientData)
-      
+
       if (response.success) {
         successCount++
         console.log(`✅ 创建患者成功: ${patientData.name}`)
@@ -2205,9 +2301,9 @@ async function add14Patients() {
       console.error(`❌ 创建患者失败 (${patientName}):`, error)
     }
   }
-  
+
   console.log(`📊 成功创建 ${successCount}/${patients.length} 个患者`)
-  
+
   // 重新获取数据
   if (successCount > 0) {
     await fetchPatients()
@@ -2289,7 +2385,7 @@ async function uploadLargeFile(file: File) {
         success: boolean
         data: { alreadyUploaded: boolean; uploadedChunks: number[] }
       }>('/video/check', { fileHash })
-      
+
       if (checkResponse.success && checkResponse.data.alreadyUploaded) {
         // 文件已完整上传，直接合并
         await mergeChunks(fileHash, file.name, fileExt, totalChunks)
@@ -2318,7 +2414,7 @@ async function uploadLargeFile(file: File) {
         // 使用fetch直接上传，因为需要FormData
         const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'
         const token = authStore.getToken() || ''
-        
+
         const response = await fetch(`${API_BASE_URL}/video/upload-chunk`, {
           method: 'POST',
           headers: {
@@ -2348,10 +2444,10 @@ async function uploadLargeFile(file: File) {
     // 所有分片上传完成，合并文件
     uploadProgress.value = 95
     await mergeChunks(fileHash, file.name, fileExt, totalChunks)
-    
+
     uploadProgress.value = 100
     uploadStatus.value = 'success'
-    
+
     // 3秒后自动关闭对话框
     setTimeout(() => {
       showUploadDialog.value = false
@@ -2400,7 +2496,7 @@ async function handleFileImport(event: Event) {
 
   try {
     const fileExtension = file.name.split('.').pop()?.toLowerCase()
-    
+
     if (fileExtension === 'csv') {
       await importCSVFile(file)
     } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
@@ -2409,7 +2505,7 @@ async function handleFileImport(event: Event) {
       alert('不支持的文件格式，请上传CSV或Excel文件')
       return
     }
-    
+
     // 清空文件输入，允许重复选择同一文件
     if (target) target.value = ''
   } catch (error) {
@@ -2422,7 +2518,7 @@ async function handleFileImport(event: Event) {
 async function importCSVFile(file: File) {
   const text = await file.text()
   const lines = text.split('\n').filter(line => line.trim())
-  
+
   if (lines.length < 2) {
     alert('CSV文件格式错误，至少需要包含表头和一行数据')
     return
@@ -2472,14 +2568,14 @@ async function importCSVFile(file: File) {
     if (values.length === 0) continue
 
     const patient: Partial<Patient> = {}
-    
+
     // 映射字段
     Object.keys(headerMap).forEach(headerKey => {
       const fieldKey = fieldMap[headerKey] || headerKey.toLowerCase()
       const valueIndex = headerMap[headerKey]
       if (valueIndex !== undefined && valueIndex < values.length) {
         const value = values[valueIndex]?.trim()
-        
+
         // 类型转换
         if (fieldKey === 'age' && value) {
           const age = parseInt(value)
@@ -2510,17 +2606,17 @@ async function importCSVFile(file: File) {
   // 批量导入数据
   let successCount = 0
   let failCount = 0
-  
+
   for (let i = 0; i < patientsToImport.length; i++) {
     try {
       await new Promise(resolve => setTimeout(resolve, 100)) // 延迟避免请求过快
-      
+
       const response = await post<{
         success: boolean
         message: string
         data: Patient
       }>('/patients', patientsToImport[i])
-      
+
       if (response.success) {
         successCount++
       } else {
@@ -2548,11 +2644,11 @@ function parseCSVLine(line: string): string[] {
   const result: string[] = []
   let current = ''
   let inQuotes = false
-  
+
   for (let i = 0; i < line.length; i++) {
     const char = line[i]
     const nextChar = line[i + 1]
-    
+
     if (char === '"') {
       if (inQuotes && nextChar === '"') {
         current += '"'
@@ -2567,7 +2663,7 @@ function parseCSVLine(line: string): string[] {
       current += char
     }
   }
-  
+
   result.push(current)
   return result
 }
@@ -2577,11 +2673,11 @@ async function importExcelFile(file: File) {
   try {
     // 动态导入xlsx库
     const XLSX = await import('xlsx')
-    
+
     // 读取文件
     const arrayBuffer = await file.arrayBuffer()
     const workbook = XLSX.read(arrayBuffer, { type: 'array' })
-    
+
     // 获取第一个工作表
     const firstSheetName = workbook.SheetNames[0]
     if (!firstSheetName) {
@@ -2593,10 +2689,10 @@ async function importExcelFile(file: File) {
       alert('Excel文件格式错误，工作表不存在')
       return
     }
-    
+
     // 转换为JSON
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][]
-    
+
     if (jsonData.length < 2) {
       alert('Excel文件格式错误，至少需要包含表头和一行数据')
       return
@@ -2650,7 +2746,7 @@ async function importExcelFile(file: File) {
       if (!row || row.length === 0) continue
 
       const patient: Partial<Patient> = {}
-      
+
       // 映射字段
     Object.keys(headerMap).forEach(headerKey => {
       const fieldKey = fieldMap[headerKey] || headerKey.toLowerCase()
@@ -2659,7 +2755,7 @@ async function importExcelFile(file: File) {
         let value = row[valueIndex]
           if (value !== null && value !== undefined) {
             value = String(value).trim()
-            
+
             // 类型转换
             if (fieldKey === 'age' && value) {
               const age = parseInt(value)
@@ -2691,17 +2787,17 @@ async function importExcelFile(file: File) {
     // 批量导入数据
     let successCount = 0
     let failCount = 0
-    
+
     for (let i = 0; i < patientsToImport.length; i++) {
       try {
         await new Promise(resolve => setTimeout(resolve, 100)) // 延迟避免请求过快
-        
+
         const response = await post<{
           success: boolean
           message: string
           data: Patient
         }>('/patients', patientsToImport[i])
-        
+
         if (response.success) {
           successCount++
         } else {
@@ -2734,9 +2830,9 @@ async function importExcelFile(file: File) {
     <!-- 顶部导航栏 -->
     <div class="top-bar">
       <div class="search-section">
-        <input 
-          type="text" 
-          class="search-input" 
+        <input
+          type="text"
+          class="search-input"
           placeholder="搜索"
           v-model="searchKeyword"
           @input="handleSearch"
@@ -2751,7 +2847,7 @@ async function importExcelFile(file: File) {
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
         </button>
-        
+
         <!-- 通知按钮 -->
         <button class="icon-btn notification-btn" title="消息">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2759,7 +2855,7 @@ async function importExcelFile(file: File) {
             <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
           </svg>
         </button>
-        
+
         <!-- 用户菜单 -->
         <div class="user-menu-wrapper">
           <button class="user-btn" @click.stop="showUserMenu = !showUserMenu">
@@ -2778,7 +2874,7 @@ async function importExcelFile(file: File) {
             <div class="dropdown-item" @click="handleMenuClick('logout')">退出</div>
           </div>
         </div>
-        
+
         <!-- 日期显示 -->
         <div class="date-section">
           <svg class="calendar-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2837,7 +2933,7 @@ async function importExcelFile(file: File) {
                 </div>
               </div>
             </div>
-            
+
             <!-- 右侧地图 -->
             <div class="map-chart-wrapper">
               <div class="map-chart">
@@ -2847,7 +2943,7 @@ async function importExcelFile(file: File) {
                     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                   </svg>
                 </button>
-                
+
                 <!-- 中国地图 -->
                 <div class="map-content">
                   <ChinaMap :data="patientLocationData" />
@@ -2907,9 +3003,9 @@ async function importExcelFile(file: File) {
             <!-- 柱状图 -->
             <div class="chart-container">
               <div class="bar-chart">
-                <v-chart 
-                  :option="barChartOption" 
-                  autoresize 
+                <v-chart
+                  :option="barChartOption"
+                  autoresize
                   style="height: 180px; width: 100%;"
                 />
               </div>
@@ -2937,9 +3033,9 @@ async function importExcelFile(file: File) {
             <!-- 折线图 -->
             <div class="chart-container">
               <div class="line-chart">
-                <v-chart 
-                  :option="lineChartOption" 
-                  autoresize 
+                <v-chart
+                  :option="lineChartOption"
+                  autoresize
                   style="height: 180px; width: 100%;"
                 />
               </div>
@@ -3022,10 +3118,10 @@ async function importExcelFile(file: File) {
                 @change="handleLargeFileUpload"
               />
               <!-- 批量操作按钮 -->
-              <button 
-                class="action-btn" 
+              <button
+                class="action-btn"
                 :class="{ active: isSelectMode }"
-                @click="toggleSelectMode" 
+                @click="toggleSelectMode"
                 title="批量操作"
               >
                 <span class="action-icon">☑️</span>
@@ -3082,8 +3178,8 @@ async function importExcelFile(file: File) {
             <thead>
               <tr>
                 <th v-if="isSelectMode" class="select-column">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     :checked="selectedPatients.length === patients.length && patients.length > 0"
                     @change="toggleSelectAll"
                     class="select-checkbox"
@@ -3105,8 +3201,8 @@ async function importExcelFile(file: File) {
                   <div class="th-content">
                     <span>性别</span>
                     <span class="sort-icon">{{ getSortIcon('gender') }}</span>
-                    <button 
-                      class="filter-btn" 
+                    <button
+                      class="filter-btn"
                       @click.stop="openFilterMenu('gender', $event)"
                       title="筛选"
                     >
@@ -3116,22 +3212,22 @@ async function importExcelFile(file: File) {
                     </button>
                     <!-- 筛选菜单 -->
                     <div v-if="activeFilterMenu === 'gender'" class="filter-dropdown" @click.stop>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.gender === '' }"
                         @click="applyFilter('gender', '')"
                       >
                         全部
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.gender === '男' }"
                         @click="applyFilter('gender', '男')"
                       >
                         男
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.gender === '女' }"
                         @click="applyFilter('gender', '女')"
                       >
@@ -3144,8 +3240,8 @@ async function importExcelFile(file: File) {
                   <div class="th-content">
                     <span>患者类别</span>
                     <span class="sort-icon">{{ getSortIcon('category') }}</span>
-                    <button 
-                      class="filter-btn" 
+                    <button
+                      class="filter-btn"
                       @click.stop="openFilterMenu('category', $event)"
                       title="筛选"
                     >
@@ -3155,50 +3251,50 @@ async function importExcelFile(file: File) {
                     </button>
                     <!-- 筛选菜单 -->
                     <div v-if="activeFilterMenu === 'category'" class="filter-dropdown" @click.stop>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.category === '' }"
                         @click="applyFilter('category', '')"
                       >
                         全部
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.category === '普通' }"
                         @click="applyFilter('category', '普通')"
                       >
                         普通
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.category === '成年人' }"
                         @click="applyFilter('category', '成年人')"
                       >
                         成年人
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.category === '老年人' }"
                         @click="applyFilter('category', '老年人')"
                       >
                         老年人
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.category === '儿童' }"
                         @click="applyFilter('category', '儿童')"
                       >
                         儿童
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.category === 'VIP' }"
                         @click="applyFilter('category', 'VIP')"
                       >
                         VIP
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.category === '急诊' }"
                         @click="applyFilter('category', '急诊')"
                       >
@@ -3211,8 +3307,8 @@ async function importExcelFile(file: File) {
                   <div class="th-content">
                     <span>治疗方案</span>
                     <span class="sort-icon">{{ getSortIcon('treatmentPlan') }}</span>
-                    <button 
-                      class="filter-btn" 
+                    <button
+                      class="filter-btn"
                       @click.stop="openFilterMenu('treatmentPlan', $event)"
                       title="筛选"
                     >
@@ -3222,43 +3318,43 @@ async function importExcelFile(file: File) {
                     </button>
                     <!-- 筛选菜单 -->
                     <div v-if="activeFilterMenu === 'treatmentPlan'" class="filter-dropdown" @click.stop>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.treatmentPlan === '' }"
                         @click="applyFilter('treatmentPlan', '')"
                       >
                         全部
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.treatmentPlan === '门诊' }"
                         @click="applyFilter('treatmentPlan', '门诊')"
                       >
                         门诊
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.treatmentPlan === '住院' }"
                         @click="applyFilter('treatmentPlan', '住院')"
                       >
                         住院
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.treatmentPlan === '急诊' }"
                         @click="applyFilter('treatmentPlan', '急诊')"
                       >
                         急诊
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.treatmentPlan === '手术' }"
                         @click="applyFilter('treatmentPlan', '手术')"
                       >
                         手术
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.treatmentPlan === '重症监护' }"
                         @click="applyFilter('treatmentPlan', '重症监护')"
                       >
@@ -3271,8 +3367,8 @@ async function importExcelFile(file: File) {
                   <div class="th-content">
                     <span>支付状态</span>
                     <span class="sort-icon">{{ getSortIcon('paymentStatus') }}</span>
-                    <button 
-                      class="filter-btn" 
+                    <button
+                      class="filter-btn"
                       @click.stop="openFilterMenu('paymentStatus', $event)"
                       title="筛选"
                     >
@@ -3282,36 +3378,36 @@ async function importExcelFile(file: File) {
                     </button>
                     <!-- 筛选菜单 -->
                     <div v-if="activeFilterMenu === 'paymentStatus'" class="filter-dropdown" @click.stop>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.paymentStatus === '' }"
                         @click="applyFilter('paymentStatus', '')"
                       >
                         全部
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.paymentStatus === '已支付' }"
                         @click="applyFilter('paymentStatus', '已支付')"
                       >
                         已支付
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.paymentStatus === '未支付' }"
                         @click="applyFilter('paymentStatus', '未支付')"
                       >
                         未支付
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.paymentStatus === '部分支付' }"
                         @click="applyFilter('paymentStatus', '部分支付')"
                       >
                         部分支付
                       </div>
-                      <div 
-                        class="filter-item" 
+                      <div
+                        class="filter-item"
                         :class="{ active: filters.paymentStatus === '待处理' }"
                         @click="applyFilter('paymentStatus', '待处理')"
                       >
@@ -3339,8 +3435,8 @@ async function importExcelFile(file: File) {
               </tr>
               <tr v-else v-for="(patient, index) in patients" :key="patient._id || patient.id">
                 <td v-if="isSelectMode" class="select-column">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     :checked="selectedPatients.includes(patient._id || patient.id || '')"
                     @change="togglePatientSelection(patient._id || patient.id || '')"
                     class="select-checkbox"
@@ -3365,12 +3461,12 @@ async function importExcelFile(file: File) {
                 <td>{{ patient.category || '普通' }}</td>
                 <td>{{ patient.treatmentPlan || '-' }}</td>
                 <td>
-                  <span 
-                    class="payment-status" 
+                  <span
+                    class="payment-status"
                     :style="{ color: getPaymentStatusColor(patient.paymentStatus) }"
                   >
-                    <span 
-                      class="status-dot" 
+                    <span
+                      class="status-dot"
                       :style="{ backgroundColor: getPaymentStatusColor(patient.paymentStatus) }"
                     ></span>
                     {{ patient.paymentStatus || '待处理' }}
@@ -3378,8 +3474,8 @@ async function importExcelFile(file: File) {
                 </td>
                 <td class="actions-cell">
                   <div class="actions-wrapper">
-                    <button 
-                      class="action-icon-btn call-btn" 
+                    <button
+                      class="action-icon-btn call-btn"
                       :title="patient.phone ? '拨打电话' : '该患者未填写电话号码'"
                       @click="handleActionMenuClick(patient, 'call')"
                       :disabled="!patient.phone"
@@ -3387,33 +3483,40 @@ async function importExcelFile(file: File) {
                       📞
                     </button>
                     <div class="action-menu-wrapper">
-                      <button 
-                        class="action-icon-btn more-btn" 
+                      <button
+                        class="action-icon-btn more-btn"
                         title="更多操作"
                         @click.stop="toggleActionMenu(getPatientId(patient))"
                       >
                         ⋯
                       </button>
-                      <div 
-                        v-if="activeActionMenu === getPatientId(patient)" 
+                      <div
+                        v-if="activeActionMenu === getPatientId(patient)"
                         class="action-menu-dropdown"
                         @click.stop
                       >
-                        <div 
+                        <div
                           class="action-menu-item"
                           @click="handleActionMenuClick(patient, 'detail')"
                         >
                           <span class="menu-icon">👁️</span>
                           <span>查看详情</span>
                         </div>
-                        <div 
+                        <div
                           class="action-menu-item"
                           @click="handleActionMenuClick(patient, 'edit')"
                         >
                           <span class="menu-icon">✏️</span>
                           <span>编辑</span>
                         </div>
-                        <div 
+                        <div
+                          class="action-menu-item"
+                          @click="handleActionMenuClick(patient, 'notify')"
+                        >
+                          <span class="menu-icon">📢</span>
+                          <span>语音通知</span>
+                        </div>
+                        <div
                           class="action-menu-item delete-item"
                           @click="handleActionMenuClick(patient, 'delete')"
                         >
@@ -3440,11 +3543,11 @@ async function importExcelFile(file: File) {
               </span>
             </span>
           </div>
-          
+
           <!-- 分页 -->
           <div class="pagination">
-            <button 
-              class="page-btn" 
+            <button
+              class="page-btn"
               :disabled="currentPage === 1"
               @click="changePage(currentPage - 1)"
             >
@@ -3468,8 +3571,8 @@ async function importExcelFile(file: File) {
             <span class="page-info">
               第 {{ currentPage }} / {{ totalPages || 1 }} 页
             </span>
-            <button 
-              class="page-btn" 
+            <button
+              class="page-btn"
               :disabled="currentPage === totalPages || totalPages === 0"
               @click="changePage(currentPage + 1)"
             >
@@ -3516,10 +3619,10 @@ async function importExcelFile(file: File) {
                   <div class="avatar-icon">👤</div>
                   <label for="avatar-input" class="avatar-upload-label">上传头像</label>
                 </div>
-                <input 
+                <input
                   id="avatar-input"
-                  type="file" 
-                  accept="image/*" 
+                  type="file"
+                  accept="image/*"
                   class="avatar-input"
                   @change="handleAvatarSelect"
                 />
@@ -3545,20 +3648,20 @@ async function importExcelFile(file: File) {
             <label class="form-label">性别</label>
             <div class="radio-group">
               <label class="radio-label">
-                <input 
-                  type="radio" 
-                  name="gender" 
-                  value="男" 
+                <input
+                  type="radio"
+                  name="gender"
+                  value="男"
                   v-model="patientForm.gender"
                   class="radio-input"
                 />
                 <span class="radio-text">男性</span>
               </label>
               <label class="radio-label">
-                <input 
-                  type="radio" 
-                  name="gender" 
-                  value="女" 
+                <input
+                  type="radio"
+                  name="gender"
+                  value="女"
                   v-model="patientForm.gender"
                   class="radio-input"
                 />
@@ -3596,7 +3699,7 @@ async function importExcelFile(file: File) {
             <label class="form-label">手机号</label>
             <input v-model="patientForm.phone" type="tel" class="form-input" placeholder="请输入手机号" />
           </div>
-          
+
           <!-- 其他可选字段（编辑时显示） -->
           <div class="form-group" v-if="editingPatient">
             <label class="form-label">年龄</label>
@@ -3628,8 +3731,8 @@ async function importExcelFile(file: File) {
       <div class="modal-dialog upload-dialog">
         <div class="modal-header">
           <h3 class="modal-title">大文件上传</h3>
-          <button 
-            class="close-btn" 
+          <button
+            class="close-btn"
             @click="showUploadDialog = false"
             :disabled="uploadingFile"
           >×</button>
@@ -3644,8 +3747,8 @@ async function importExcelFile(file: File) {
           <!-- 上传进度 -->
           <div class="upload-progress-section">
             <div class="progress-bar-wrapper">
-              <div 
-                class="progress-bar" 
+              <div
+                class="progress-bar"
                 :style="{ width: uploadProgress + '%' }"
                 :class="{
                   'progress-success': uploadStatus === 'success',
@@ -3669,21 +3772,21 @@ async function importExcelFile(file: File) {
 
           <!-- 操作按钮 -->
           <div class="upload-actions">
-            <button 
+            <button
               v-if="uploadStatus === 'error'"
               class="btn btn-primary"
               @click="showUploadDialog = false"
             >
               关闭
             </button>
-            <button 
+            <button
               v-else-if="uploadStatus === 'success'"
               class="btn btn-primary"
               @click="showUploadDialog = false"
             >
               完成
             </button>
-            <button 
+            <button
               v-else
               class="btn btn-secondary"
               @click="showUploadDialog = false"
@@ -3777,15 +3880,15 @@ async function importExcelFile(file: File) {
                 <div class="detail-item">
                   <span class="detail-label">支付状态</span>
                   <span class="detail-value">
-                    <span 
+                    <span
                       class="payment-status-badge"
-                      :style="{ 
+                      :style="{
                         color: getPaymentStatusColor(selectedPatient.paymentStatus),
                         backgroundColor: getPaymentStatusColor(selectedPatient.paymentStatus) + '15'
                       }"
                     >
-                      <span 
-                        class="status-dot" 
+                      <span
+                        class="status-dot"
                         :style="{ backgroundColor: getPaymentStatusColor(selectedPatient.paymentStatus) }"
                       ></span>
                       {{ selectedPatient.paymentStatus || '待处理' }}
@@ -3862,6 +3965,72 @@ async function importExcelFile(file: File) {
       </div>
     </div>
 
+    <!-- 语音通知对话框 -->
+    <div v-if="showNotifyDialog && notifyPatient" class="modal-overlay" @click.self="closeNotifyDialog">
+      <div class="notify-dialog">
+        <div class="notify-dialog-header">
+          <h3 class="notify-dialog-title">📢 语音通知</h3>
+          <button class="close-btn" @click="closeNotifyDialog">×</button>
+        </div>
+        <div class="notify-dialog-content">
+          <div class="notify-patient-info">
+            <div class="notify-patient-avatar">
+              <span v-if="!notifyPatient.avatar || !notifyPatient.avatar.startsWith('data:')">👤</span>
+              <img v-else :src="notifyPatient.avatar" alt="头像" class="notify-avatar-img" />
+            </div>
+            <div class="notify-patient-details">
+              <div class="notify-patient-name">{{ notifyPatient.name }}</div>
+              <div class="notify-patient-phone">{{ notifyPatient.phone }}</div>
+            </div>
+          </div>
+
+          <div class="notify-form">
+            <div class="notify-form-group">
+              <label class="notify-label">医院名称</label>
+              <input v-model="notifyForm.hospitalName" class="notify-input" placeholder="选填, 默认本院" />
+            </div>
+            <div class="notify-form-group">
+              <label class="notify-label">科室</label>
+              <input v-model="notifyForm.department" class="notify-input" placeholder="如：内科" />
+            </div>
+            <div class="notify-form-group">
+              <label class="notify-label">医生姓名</label>
+              <input v-model="notifyForm.doctorName" class="notify-input" placeholder="如：李医生" />
+            </div>
+            <div class="notify-form-group">
+              <label class="notify-label">就诊时间</label>
+              <input v-model="notifyForm.appointmentTime" class="notify-input" placeholder="如：2026年2月15日上午9:00" />
+            </div>
+            <div class="notify-form-group">
+              <label class="notify-label">就诊地点</label>
+              <input v-model="notifyForm.clinicLocation" class="notify-input" placeholder="如：门诊楼2楼203诊室" />
+            </div>
+            <div class="notify-form-group">
+              <label class="notify-label">携带证件</label>
+              <input v-model="notifyForm.requiredDocuments" class="notify-input" placeholder="身份证和医保卡" />
+            </div>
+          </div>
+
+          <div class="notify-preview">
+            <div class="notify-preview-label">通知内容预览：</div>
+            <div class="notify-preview-text">
+              您预约的{{ notifyForm.hospitalName || '本院' }}{{ notifyForm.department }}{{ notifyForm.doctorName || '医生' }}医生{{ notifyForm.appointmentTime ? '的就诊时间为' + notifyForm.appointmentTime : '' }}，请准时前往{{ notifyForm.clinicLocation }}，并携带{{ notifyForm.requiredDocuments || '身份证和医保卡' }}。
+            </div>
+          </div>
+
+          <div class="notify-dialog-actions">
+            <button class="notify-action-btn notify-cancel-btn" @click="closeNotifyDialog" :disabled="notifyLoading">
+              取消
+            </button>
+            <button class="notify-action-btn notify-send-btn" @click="executeVoiceNotify" :disabled="notifyLoading">
+              <span v-if="notifyLoading">发送中...</span>
+              <span v-else>📢 发送语音通知</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 全屏模态框 -->
     <transition name="fade">
       <div v-if="fullscreenType" class="fullscreen-overlay" @click.self="fullscreenType !== 'map' ? closeFullscreen() : null">
@@ -3873,7 +4042,7 @@ async function importExcelFile(file: File) {
               <div class="tech-grid"></div>
               <div class="tech-particles"></div>
             </div>
-            
+
             <!-- 顶部标题栏 -->
             <div class="tech-header">
               <div class="tech-title-wrapper">
@@ -3888,7 +4057,7 @@ async function importExcelFile(file: File) {
                 </svg>
               </button>
             </div>
-            
+
             <!-- 左侧数据面板 -->
             <div class="tech-panel tech-panel-left">
               <div class="tech-panel-title">核心指标</div>
@@ -3921,14 +4090,14 @@ async function importExcelFile(file: File) {
                 </div>
               </div>
             </div>
-            
+
             <!-- 中央3D地图区域 -->
             <div class="tech-map-container">
               <div class="map-content tech-map-content">
                 <ChinaMap :data="patientLocationData" />
               </div>
             </div>
-            
+
             <!-- 右侧数据面板 -->
             <div class="tech-panel tech-panel-right">
               <div class="tech-panel-title">数据统计</div>
@@ -3959,7 +4128,7 @@ async function importExcelFile(file: File) {
                 </div>
               </div>
             </div>
-            
+
             <!-- 底部数据面板 -->
             <div class="tech-panel tech-panel-bottom">
               <div class="tech-panel-title">省份数据统计</div>
@@ -3983,7 +4152,7 @@ async function importExcelFile(file: File) {
               </div>
             </div>
           </div>
-          
+
           <!-- 患者总数图表全屏 -->
           <div v-if="fullscreenType === 'patients'" class="fullscreen-content fullscreen-chart">
             <div class="fullscreen-header">
@@ -4000,15 +4169,15 @@ async function importExcelFile(file: File) {
                 </span>
               </div>
               <div class="fullscreen-chart-wrapper">
-                <v-chart 
-                  :option="barChartOption" 
-                  autoresize 
+                <v-chart
+                  :option="barChartOption"
+                  autoresize
                   style="height: 500px; width: 100%;"
                 />
               </div>
             </div>
           </div>
-          
+
           <!-- 预约总数图表全屏 -->
           <div v-if="fullscreenType === 'appointments'" class="fullscreen-content fullscreen-chart">
             <div class="fullscreen-header">
@@ -4021,9 +4190,9 @@ async function importExcelFile(file: File) {
                 <span class="trend-label">预约量增加了 {{ appointmentTrend }}%</span>
               </div>
               <div class="fullscreen-chart-wrapper">
-                <v-chart 
-                  :option="lineChartOption" 
-                  autoresize 
+                <v-chart
+                  :option="lineChartOption"
+                  autoresize
                   style="height: 500px; width: 100%;"
                 />
               </div>
@@ -4738,7 +4907,7 @@ async function importExcelFile(file: File) {
   display: grid;
   grid-template-columns: 280px 1fr 280px;
   grid-template-rows: 80px 1fr 200px;
-  grid-template-areas: 
+  grid-template-areas:
     "header header header"
     "left map right"
     "bottom bottom bottom";
@@ -4764,7 +4933,7 @@ async function importExcelFile(file: File) {
   left: 0;
   right: 0;
   bottom: 0;
-  background-image: 
+  background-image:
     linear-gradient(rgba(0, 255, 0, 0.1) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 255, 0, 0.1) 1px, transparent 1px);
   background-size: 50px 50px;
@@ -4782,7 +4951,7 @@ async function importExcelFile(file: File) {
   left: 0;
   right: 0;
   bottom: 0;
-  background: 
+  background:
     radial-gradient(circle at 20% 30%, rgba(0, 255, 0, 0.1) 0%, transparent 50%),
     radial-gradient(circle at 80% 70%, rgba(255, 165, 0, 0.1) 0%, transparent 50%),
     radial-gradient(circle at 50% 50%, rgba(0, 255, 0, 0.05) 0%, transparent 50%);
@@ -7755,5 +7924,230 @@ async function importExcelFile(file: File) {
 
 :global(.dark) .btn-secondary:hover:not(:disabled) {
   background: rgba(30, 41, 59, 1);
+}
+
+/* 语音通知对话框样式 */
+.notify-dialog {
+  background: white;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.notify-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.notify-dialog-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #333;
+  margin: 0;
+}
+
+.notify-dialog-content {
+  padding: 24px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.notify-patient-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.notify-patient-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.notify-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.notify-patient-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.notify-patient-phone {
+  font-size: 14px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.notify-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.notify-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.notify-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.notify-input {
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #1e293b;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.notify-input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.notify-input::placeholder {
+  color: #94a3b8;
+}
+
+.notify-preview {
+  padding: 14px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+
+.notify-preview-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 6px;
+}
+
+.notify-preview-text {
+  font-size: 14px;
+  color: #78350f;
+  line-height: 1.6;
+}
+
+.notify-dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.notify-action-btn {
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s;
+}
+
+.notify-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.notify-cancel-btn {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.notify-cancel-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.notify-send-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.notify-send-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5568d3 0%, #6a4293 100%);
+}
+
+/* 暗色模式 - 语音通知对话框 */
+:global(.dark) .notify-dialog {
+  background: #1e293b;
+}
+
+:global(.dark) .notify-dialog-header {
+  border-bottom-color: rgba(102, 126, 234, 0.3);
+}
+
+:global(.dark) .notify-dialog-title {
+  color: #fff;
+}
+
+:global(.dark) .notify-patient-info {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+:global(.dark) .notify-patient-name {
+  color: #e2e8f0;
+}
+
+:global(.dark) .notify-label {
+  color: #94a3b8;
+}
+
+:global(.dark) .notify-input {
+  background: #0f172a;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+
+:global(.dark) .notify-input:focus {
+  border-color: #667eea;
+}
+
+:global(.dark) .notify-preview {
+  background: rgba(120, 53, 15, 0.15);
+  border-color: rgba(253, 230, 138, 0.3);
+}
+
+:global(.dark) .notify-preview-label {
+  color: #fcd34d;
+}
+
+:global(.dark) .notify-preview-text {
+  color: #fde68a;
+}
+
+:global(.dark) .notify-cancel-btn {
+  background: rgba(30, 41, 59, 0.9);
+  color: #cbd5e1;
 }
 </style>

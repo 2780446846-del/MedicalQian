@@ -423,13 +423,6 @@
         "navigationBarTitleText": "网页导航",
         "backgroundColor": "#ffffff"
       }
-    },
-    {
-      "path": "pages/location-demo/index",
-      "style": {
-        "navigationBarTitleText": "位置与导航演示",
-        "backgroundColor": "#ffffff"
-      }
     }
   ],
   "globalStyle": {

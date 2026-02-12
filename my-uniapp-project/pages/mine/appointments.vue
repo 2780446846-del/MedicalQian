@@ -63,42 +63,12 @@
           <view class="patient-info">
             <text class="patient-text">就诊人:{{ item.patientName }} {{ item.date }} {{ item.time }}</text>
           </view>
-          <view class="price-info" @click.stop="showPaymentOptions(item)">
+          <view class="price-info">
             <text class="price-text">¥{{ item.price }}</text>
           </view>
         </view>
       </view>
     </scroll-view>
-
-    <!-- 支付方式选择弹窗 -->
-    <view v-if="showPaymentModal" class="payment-modal" @click="closePaymentModal">
-      <view class="payment-modal-content" @click.stop>
-        <view class="payment-modal-header">
-          <text class="payment-modal-title">选择支付方式</text>
-          <view class="payment-modal-close" @click="closePaymentModal">✕</view>
-        </view>
-        <view class="payment-amount">
-          <text class="payment-amount-label">支付金额</text>
-          <text class="payment-amount-value">¥{{ selectedItem?.price || 0 }}</text>
-        </view>
-        <view class="payment-methods">
-          <view class="payment-method-item" @click="selectPaymentMethod('alipay')">
-            <view class="payment-method-icon alipay-icon">💙</view>
-            <view class="payment-method-info">
-              <text class="payment-method-name">支付宝支付</text>
-              <text class="payment-method-desc">推荐使用，安全快捷</text>
-            </view>
-            <view class="payment-method-radio" :class="{ active: paymentMethod === 'alipay' }">
-              <view v-if="paymentMethod === 'alipay'" class="payment-method-radio-dot"></view>
-            </view>
-          </view>
-        </view>
-        <view class="payment-modal-footer">
-          <button class="payment-cancel-btn" @click="closePaymentModal">取消</button>
-          <button class="payment-confirm-btn" @click="confirmPayment">确认支付</button>
-        </view>
-      </view>
-    </view>
 
     <!-- 主题切换按钮 -->
     <ThemeToggle />
@@ -108,7 +78,6 @@
 <script>
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import { getCurrentTheme } from '@/utils/theme.js';
-import { post } from '@/utils/api.js';
 // 导入本地存储工具
 import { getAppointmentsByStatus, getAllAppointments as getLocalAllAppointments } from '@/utils/appointmentStorage.js';
 
@@ -122,15 +91,13 @@ export default {
       theme: getCurrentTheme(),
       tabs: [
         { key: 'all', label: '全部' },
+        { key: 'pendingPayment', label: '待支付' },
         { key: 'pendingVisit', label: '待就诊' },
         { key: 'pendingRate', label: '待评价' },
         { key: 'rated', label: '已评价' },
         { key: 'history', label: '历史' }
       ],
       appointmentList: [],
-      showPaymentModal: false,
-      selectedItem: null,
-      paymentMethod: 'alipay' // 默认选择支付宝
     };
   },
   computed: {
@@ -142,27 +109,6 @@ export default {
   onLoad(query) {
     if (query && query.type) {
       this.activeTab = query.type;
-    }
-    // 支付完成后回跳时，显示提示并跳转到首页
-    if (query && (query.status === 'success' || query.from === 'alipay')) {
-      uni.showToast({
-        title: '支付成功',
-        icon: 'success',
-        duration: 2000,
-      });
-      
-      // 2秒后自动跳转到首页
-      setTimeout(() => {
-        uni.switchTab({
-          url: '/pages/index/index',
-          success: () => {
-            console.log('✅ 支付成功，已跳转到首页');
-          },
-          fail: (err) => {
-            console.error('❌ 跳转首页失败:', err);
-          }
-        });
-      }, 2000);
     }
     // 加载预约数据
     this.loadAppointments();
@@ -220,53 +166,61 @@ export default {
       this.filterAppointments();
     },
     async loadAppointments() {
-      console.log('🔍 开始加载预约数据，当前标签:', this.activeTab);
+      console.log('🔍 加载预约数据，标签:', this.activeTab);
       
-      // 先尝试从本地存储读取（用于调试和快速显示）
+      // 优先从后端API获取
       try {
-        const localAppointments = getAppointmentsByStatus(this.activeTab);
-        console.log('📦 本地存储数据:', {
-          activeTab: this.activeTab,
-          localCount: localAppointments ? localAppointments.length : 0,
-          localData: localAppointments
-        });
+        const { get } = require('@/utils/api.js');
+        const statusParam = this.activeTab === 'all' ? '' : `?status=${this.activeTab}`;
+        const res = await get(`/appointment${statusParam}`);
         
-        // 如果本地有数据，直接使用
-        if (localAppointments && Array.isArray(localAppointments) && localAppointments.length > 0) {
-          console.log('✅ 使用本地存储数据，数量:', localAppointments.length);
-          this.appointmentList = localAppointments.map(item => {
-            let formattedDate = item.date;
-            if (formattedDate && formattedDate.includes('年')) {
-              const dateMatch = formattedDate.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-              if (dateMatch) {
-                const year = dateMatch[1];
-                const month = dateMatch[2].padStart(2, '0');
-                const day = dateMatch[3].padStart(2, '0');
-                formattedDate = `${year}-${month}-${day}`;
-              }
-            }
+        if (res && res.success && Array.isArray(res.data)) {
+          console.log('✅ 后端API返回预约数据:', res.data.length);
+          this.appointmentList = res.data.map(item => {
             return {
-              ...item,
-              id: item.id || item._id,
-              date: formattedDate,
-              avatar: item.avatar || item.doctorAvatar || 'https://dummyimage.com/120x120/4a90e2/ffffff&text=医生',
-              expertise: item.expertise || item.doctorExpertise || '专业领域',
-              price: item.price || 0,
-              doctorName: item.doctorName || item.name || '医生',
+              id: item._id || item.id,
+              doctorName: item.doctorName || '医生',
+              title: item.appointmentType || '专家门诊',
               hospital: item.hospital || '',
-              specialty: item.specialty || item.dept || '',
-              title: item.title || ''
+              specialty: item.department || '',
+              expertise: item.doctorExpertise || '专业领域',
+              avatar: item.doctorAvatar || 'https://dummyimage.com/120x120/4a90e2/ffffff&text=医生',
+              patientName: item.patientName || '',
+              date: item.date || '',
+              time: item.time || '',
+              price: item.price || 0,
+              status: item.status || 'pendingPayment',
+              paymentStatus: item.paymentStatus || 'unpaid',
+              outTradeNo: item.outTradeNo || ''
             };
           });
-          console.log('📋 最终显示的预约列表（本地）:', this.appointmentList);
           return;
         }
       } catch (e) {
-        console.error('读取本地存储失败:', e);
+        console.warn('后端API加载失败，尝试本地存储:', e);
       }
       
-      // 如果本地没有数据，显示空状态
-      console.log('❌ 本地存储没有数据');
+      // 后端失败时回退到本地存储
+      try {
+        const localAppointments = getAppointmentsByStatus(this.activeTab);
+        if (localAppointments && localAppointments.length > 0) {
+          this.appointmentList = localAppointments.map(item => ({
+            ...item,
+            id: item.id || item._id,
+            avatar: item.avatar || item.doctorAvatar || 'https://dummyimage.com/120x120/4a90e2/ffffff&text=医生',
+            expertise: item.expertise || item.doctorExpertise || '专业领域',
+            price: item.price || 0,
+            doctorName: item.doctorName || '医生',
+            hospital: item.hospital || '',
+            specialty: item.specialty || item.dept || '',
+            title: item.title || ''
+          }));
+          return;
+        }
+      } catch (e) {
+        console.error('本地存储读取失败:', e);
+      }
+      
       this.appointmentList = [];
     },
     filterAppointments() {
@@ -276,9 +230,11 @@ export default {
     getStatusText(status) {
       const statusMap = {
         pendingVisit: '待就诊',
+        pendingPayment: '待支付',
         pendingRate: '待评价',
         rated: '已评价',
-        history: '历史'
+        history: '历史',
+        cancelled: '已取消'
       };
       return statusMap[status] || '未知';
     },
@@ -345,822 +301,6 @@ export default {
       }
     },
     
-    // 显示支付方式选择弹窗
-    showPaymentOptions(item) {
-      console.log('💳 显示支付方式选择，预约信息:', item);
-      this.selectedItem = item;
-      this.showPaymentModal = true;
-    },
-    
-    // 关闭支付方式选择弹窗
-    closePaymentModal() {
-      this.showPaymentModal = false;
-      this.selectedItem = null;
-      this.paymentMethod = 'alipay'; // 重置为默认支付方式
-    },
-    
-    // 选择支付方式
-    selectPaymentMethod(method) {
-      console.log('✅ 选择支付方式:', method);
-      this.paymentMethod = method;
-    },
-    
-    // 确认支付
-    async confirmPayment() {
-      if (!this.selectedItem) {
-        uni.showToast({
-          title: '请选择要支付的订单',
-          icon: 'none'
-        });
-        return;
-      }
-      
-      // 保存选中的项目和支付方式
-      const item = this.selectedItem;
-      const method = this.paymentMethod;
-      
-      // 关闭弹窗
-      this.closePaymentModal();
-      
-      // 根据选择的支付方式调用对应的支付方法
-      if (method === 'alipay') {
-        await this.goAlipay(item);
-      } else if (method === 'wechat') {
-        await this.goWechatPay(item);
-      } else if (method === 'unionpay') {
-        await this.goUnionpay(item);
-      } else if (method === 'stripe') {
-        await this.goStripe(item);
-      }
-    },
-    
-    // 支付宝支付
-    async goAlipay(item) {
-      console.log('🎯 开始支付宝支付流程');
-      console.log('📦 传入的 item:', item);
-      
-      let loadingShown = false;
-      try {
-        const amount = item.price;
-        console.log('💰 价格金额:', amount);
-        
-        if (!amount) {
-          console.log('❌ 金额无效');
-          uni.showToast({
-            title: '金额无效，无法发起支付',
-            icon: 'none'
-          });
-          return;
-        }
-
-        // 检测是否为移动设备
-        const isMobile = this.isMobileDevice();
-        console.log('📱 设备类型检测:', isMobile ? '移动端' : 'PC端');
-
-        // 移动端提示：将使用PC端支付页面，适配移动浏览器
-        if (isMobile) {
-          uni.showToast({
-            title: '正在打开支付页面...',
-            icon: 'loading',
-            duration: 2000
-          });
-        }
-
-        // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建支付订单...',
-          mask: true
-        });
-
-        // 调用后端支付接口
-        // 使用 wap 接口（手机端支付），适配移动端和PC端
-        let res;
-        try {
-          res = await post('/pay/alipay/wap', {
-            appointmentId: item.id || '',
-            subject: `预约${item.doctorName}医生`,
-            totalAmount: amount.toString(),
-            body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
-          }, {
-            showLoading: false // 禁用 api.js 内部的 loading，使用手动控制
-          });
-        } catch (apiError) {
-          // API调用失败，确保隐藏loading
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-          
-          // 提取错误信息
-          const errorMsg = apiError?.message || apiError?.data?.message || '创建支付订单失败';
-          console.error('❌ 创建支付订单API调用失败:', apiError);
-          
-          uni.showToast({
-            title: errorMsg,
-            icon: 'none',
-            duration: 3000
-          });
-          return;
-        }
-
-        // 确保隐藏loading
-        if (loadingShown) {
-          uni.hideLoading();
-          loadingShown = false;
-        }
-
-        // 检查响应是否成功
-        if (!res) {
-          uni.showToast({
-            title: '创建支付订单失败：服务器无响应',
-            icon: 'none',
-            duration: 2000
-          });
-          return;
-        }
-
-        // 检查是否成功创建订单
-        if (!res.success) {
-          uni.showToast({
-            title: res?.message || '创建支付订单失败',
-            icon: 'none',
-            duration: 3000
-          });
-          return;
-        }
-
-        // 检查是否有支付URL
-        if (!res.payUrl) {
-          uni.showToast({
-            title: res?.message || '支付URL无效，请重试',
-            icon: 'none',
-            duration: 2000
-          });
-          return;
-        }
-
-        console.log('✅ 支付订单创建成功');
-        console.log('🔍 完整响应:', res);
-        console.log('🔍 payUrl:', res.payUrl);
-
-        // 验证 payUrl 是否存在
-        if (!res.payUrl || typeof res.payUrl !== 'string') {
-          uni.showToast({
-            title: '支付URL无效，请重试',
-            icon: 'none',
-            duration: 3000
-          });
-          console.error('❌ payUrl 无效:', res.payUrl);
-          return;
-        }
-
-        // 跳转到支付宝支付页面
-        // #ifdef H5
-        try {
-          console.log('🔗 准备跳转到支付页面...');
-          console.log('🔗 payUrl:', res.payUrl);
-          
-          // 在 uni-app H5 环境下，使用 window.location.href 跳转
-          if (typeof window !== 'undefined') {
-            console.log('🔗 使用 window.location.href 跳转');
-            
-            // 直接跳转
-            setTimeout(() => {
-              window.location.href = res.payUrl;
-            }, 200);
-          } else {
-            throw new Error('当前环境不支持 window 对象');
-          }
-        } catch (jumpError) {
-          console.error('❌ 跳转失败:', jumpError);
-          uni.showToast({
-            title: '跳转失败：' + jumpError.message,
-            icon: 'none',
-            duration: 3000
-          });
-        }
-        // #endif
-        
-        // #ifdef APP-PLUS
-        // App环境下，使用 plus.runtime.openURL 打开支付URL
-        try {
-          console.log('📱 App环境：准备打开支付URL...');
-          console.log('🔗 payUrl前200字符:', res.payUrl.substring(0, 200));
-          
-          // 检测是否为沙箱版本
-          const isSandbox = res.payUrl.includes('sandbox') || res.payUrl.includes('alipaydev.com');
-          console.log('🔍 支付环境检测:', isSandbox ? '✅ 沙箱环境' : '⚠️ 正式环境');
-          
-          if (!isSandbox) {
-            console.warn('⚠️ 警告：当前支付URL不是沙箱版本！');
-            uni.showToast({
-              title: '警告：当前不是沙箱环境',
-              icon: 'none',
-              duration: 2000
-            });
-          }
-          
-          // 检查支付URL格式
-          if (!res.payUrl.includes('gateway.do') && !res.payUrl.includes('mobileclientgw')) {
-            uni.showToast({
-              title: '支付URL格式错误',
-              icon: 'none',
-              duration: 3000
-            });
-            console.error('❌ 支付URL格式错误:', res.payUrl);
-            return;
-          }
-          
-          // 使用 plus.runtime.openURL 打开支付URL
-          // 这会尝试打开支付宝APP，如果未安装则打开浏览器
-          if (typeof plus !== 'undefined' && plus.runtime) {
-            plus.runtime.openURL(res.payUrl, (error) => {
-              if (error) {
-                console.error('❌ 打开支付URL失败:', error);
-                uni.showToast({
-                  title: '打开支付失败，请检查是否安装支付宝',
-                  icon: 'none',
-                  duration: 3000
-                });
-                // 备用方案：显示支付URL让用户手动打开
-                this.showPayUrlModal(res.payUrl);
-              } else {
-                console.log('✅ 支付URL已打开');
-              }
-            });
-          } else {
-            console.error('❌ plus.runtime 不可用');
-            uni.showToast({
-              title: '当前环境不支持打开支付',
-              icon: 'none',
-              duration: 3000
-            });
-            this.showPayUrlModal(res.payUrl);
-          }
-        } catch (appError) {
-          console.error('❌ App环境支付失败:', appError);
-          uni.showToast({
-            title: '打开支付失败，请重试',
-            icon: 'none',
-            duration: 3000
-          });
-          this.showPayUrlModal(res.payUrl);
-        }
-        // #endif
-        
-        // #ifdef MP
-        // 小程序环境：提示用户在浏览器中打开
-        uni.showModal({
-          title: '支付提示',
-          content: '小程序暂不支持直接支付，请在浏览器中打开链接完成支付',
-          showCancel: false,
-          confirmText: '知道了'
-        });
-        // #endif
-      } catch (error) {
-        // 确保隐藏loading（防止重复调用）
-        if (loadingShown) {
-          try {
-            uni.hideLoading();
-          } catch (e) {
-            // 忽略hideLoading错误
-          }
-          loadingShown = false;
-        }
-        
-        console.error('❌ 发起支付失败:', error);
-        
-        // 提取更详细的错误信息
-        let errorMsg = '发起支付失败';
-        if (error?.message) {
-          errorMsg = error.message;
-        } else if (error?.data?.message) {
-          errorMsg = error.data.message;
-        } else if (typeof error === 'string') {
-          errorMsg = error;
-        }
-        
-        // 如果是网络错误，提供更友好的提示
-        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
-          errorMsg = '网络连接失败，请检查网络后重试';
-        }
-        
-        uni.showToast({
-          title: errorMsg,
-          icon: 'none',
-          duration: 3000
-        });
-      }
-    },
-    
-    // 微信支付
-    async goWechatPay(item) {
-      console.log('🎯 开始微信支付流程');
-      console.log('📦 传入的 item:', item);
-      
-      let loadingShown = false;
-      try {
-        const amount = item.price;
-        console.log('💰 价格金额:', amount);
-        
-        if (!amount) {
-          console.log('❌ 金额无效');
-          uni.showToast({
-            title: '金额无效，无法发起支付',
-            icon: 'none'
-          });
-          return;
-        }
-
-        // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建微信支付订单...',
-          mask: true
-        });
-
-        // 调用后端微信支付接口
-        let res;
-        try {
-          res = await post('/wechatpay/h5', {
-            appointmentId: item.id || '',
-            subject: `预约${item.doctorName}医生`,
-            totalAmount: amount.toString(),
-            body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
-          }, {
-            showLoading: false
-          });
-        } catch (apiError) {
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-          
-          const errorMsg = apiError?.message || apiError?.data?.message || '创建微信支付订单失败';
-          console.error('❌ 创建微信支付订单API调用失败:', apiError);
-          
-          uni.showToast({
-            title: errorMsg,
-            icon: 'none',
-            duration: 3000
-          });
-          return;
-        }
-
-        // 隐藏loading
-        if (loadingShown) {
-          uni.hideLoading();
-          loadingShown = false;
-        }
-
-        // 检查响应
-        if (!res || !res.success) {
-          uni.showToast({
-            title: res?.message || '创建微信支付订单失败',
-            icon: 'none',
-            duration: 3000
-          });
-          return;
-        }
-
-        // 检查支付URL
-        if (!res.payUrl) {
-          uni.showToast({
-            title: '支付URL无效，请重试',
-            icon: 'none',
-            duration: 2000
-          });
-          return;
-        }
-
-        console.log('✅ 微信支付订单创建成功');
-        console.log('🔍 payUrl:', res.payUrl);
-
-        // 跳转到微信支付页面
-        // #ifdef H5
-        try {
-          console.log('🔗 准备跳转到微信支付页面...');
-          
-          if (typeof window !== 'undefined') {
-            console.log('🔗 使用 window.location.href 跳转');
-            setTimeout(() => {
-              window.location.href = res.payUrl;
-            }, 200);
-          } else {
-            throw new Error('当前环境不支持 window 对象');
-          }
-        } catch (jumpError) {
-          console.error('❌ 跳转失败:', jumpError);
-          uni.showToast({
-            title: '跳转失败：' + jumpError.message,
-            icon: 'none',
-            duration: 3000
-          });
-        }
-        // #endif
-        
-        // #ifdef APP-PLUS
-        try {
-          console.log('📱 App环境：准备打开微信支付...');
-          
-          if (typeof plus !== 'undefined' && plus.runtime) {
-            plus.runtime.openURL(res.payUrl, (error) => {
-              if (error) {
-                console.error('❌ 打开微信支付失败:', error);
-                uni.showToast({
-                  title: '打开微信支付失败，请检查是否安装微信',
-                  icon: 'none',
-                  duration: 3000
-                });
-              } else {
-                console.log('✅ 微信支付已打开');
-              }
-            });
-          } else {
-            console.error('❌ plus.runtime 不可用');
-            uni.showToast({
-              title: '当前环境不支持打开支付',
-              icon: 'none',
-              duration: 3000
-            });
-          }
-        } catch (appError) {
-          console.error('❌ App环境微信支付失败:', appError);
-          uni.showToast({
-            title: '打开微信支付失败，请重试',
-            icon: 'none',
-            duration: 3000
-          });
-        }
-        // #endif
-        
-        // #ifdef MP
-        uni.showModal({
-          title: '支付提示',
-          content: '小程序暂不支持直接支付，请在浏览器中打开链接完成支付',
-          showCancel: false,
-          confirmText: '知道了'
-        });
-        // #endif
-      } catch (error) {
-        if (loadingShown) {
-          try {
-            uni.hideLoading();
-          } catch (e) {
-            // 忽略错误
-          }
-          loadingShown = false;
-        }
-        
-        console.error('❌ 发起微信支付失败:', error);
-        
-        let errorMsg = '发起微信支付失败';
-        if (error?.message) {
-          errorMsg = error.message;
-        } else if (error?.data?.message) {
-          errorMsg = error.data.message;
-        } else if (typeof error === 'string') {
-          errorMsg = error;
-        }
-        
-        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
-          errorMsg = '网络连接失败，请检查网络后重试';
-        }
-        
-        uni.showToast({
-          title: errorMsg,
-          icon: 'none',
-          duration: 3000
-        });
-      }
-    },
-    
-    // 银联支付
-    async goUnionpay(item) {
-      console.log('🎯 开始银联支付流程');
-      console.log('📦 传入的 item:', item);
-      
-      let loadingShown = false;
-      try {
-        const amount = item.price;
-        console.log('💰 价格金额:', amount);
-        
-        if (!amount) {
-          console.log('❌ 金额无效');
-          uni.showToast({
-            title: '金额无效，无法发起支付',
-            icon: 'none'
-          });
-          return;
-        }
-
-        // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建银联支付订单...',
-          mask: true
-        });
-
-        // 调用后端银联支付接口
-        // 注意：银联支付返回的是HTML表单，需要特殊处理
-        try {
-          const response = await fetch('http://localhost:3000/api/unionpay/create', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              appointmentId: item.id || '',
-              subject: `预约${item.doctorName}医生`,
-              totalAmount: amount.toString(),
-              body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
-            })
-          });
-
-          // 隐藏loading
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-
-          if (!response.ok) {
-            throw new Error('创建银联支付订单失败');
-          }
-
-          // 获取HTML内容
-          const htmlContent = await response.text();
-          
-          console.log('✅ 银联支付订单创建成功');
-
-          // 在当前窗口中打开HTML表单（会自动提交到银联网关）
-          // #ifdef H5
-          try {
-            console.log('🔗 准备跳转到银联支付页面...');
-            
-            if (typeof window !== 'undefined') {
-              // 在当前窗口写入HTML内容，表单会自动提交到银联网关
-              document.open();
-              document.write(htmlContent);
-              document.close();
-            } else {
-              throw new Error('当前环境不支持 window 对象');
-            }
-          } catch (jumpError) {
-            console.error('❌ 跳转失败:', jumpError);
-            uni.showToast({
-              title: '跳转失败：' + jumpError.message,
-              icon: 'none',
-              duration: 3000
-            });
-          }
-          // #endif
-          
-          // #ifdef APP-PLUS
-          uni.showModal({
-            title: '支付提示',
-            content: 'APP环境暂不支持银联支付，请在浏览器中打开',
-            showCancel: false,
-            confirmText: '知道了'
-          });
-          // #endif
-          
-          // #ifdef MP
-          uni.showModal({
-            title: '支付提示',
-            content: '小程序暂不支持银联支付，请在浏览器中打开',
-            showCancel: false,
-            confirmText: '知道了'
-          });
-          // #endif
-        } catch (apiError) {
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-          
-          const errorMsg = apiError?.message || '创建银联支付订单失败';
-          console.error('❌ 创建银联支付订单失败:', apiError);
-          
-          uni.showToast({
-            title: errorMsg,
-            icon: 'none',
-            duration: 3000
-          });
-          return;
-        }
-      } catch (error) {
-        if (loadingShown) {
-          try {
-            uni.hideLoading();
-          } catch (e) {
-            // 忽略错误
-          }
-          loadingShown = false;
-        }
-        
-        console.error('❌ 发起银联支付失败:', error);
-        
-        let errorMsg = '发起银联支付失败';
-        if (error?.message) {
-          errorMsg = error.message;
-        } else if (typeof error === 'string') {
-          errorMsg = error;
-        }
-        
-        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
-          errorMsg = '网络连接失败，请检查网络后重试';
-        }
-        
-        uni.showToast({
-          title: errorMsg,
-          icon: 'none',
-          duration: 3000
-        });
-      }
-    },
-    
-    // Stripe 支付
-    async goStripe(item) {
-      console.log('🎯 开始 Stripe 支付流程');
-      console.log('📦 传入的 item:', item);
-      
-      let loadingShown = false;
-      try {
-        const amount = item.price;
-        console.log('💰 价格金额:', amount);
-        
-        if (!amount) {
-          console.log('❌ 金额无效');
-          uni.showToast({
-            title: '金额无效，无法发起支付',
-            icon: 'none'
-          });
-          return;
-        }
-
-        // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建 Stripe 支付...',
-          mask: true
-        });
-
-        // 调用后端 Stripe 支付接口
-        let res;
-        try {
-          res = await post('/stripe/create-checkout-session', {
-            appointmentId: item.id || '',
-            subject: `预约${item.doctorName}医生`,
-            totalAmount: amount.toString(),
-            body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
-          }, {
-            showLoading: false
-          });
-        } catch (apiError) {
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-          
-          const errorMsg = apiError?.message || apiError?.data?.message || '创建 Stripe 支付失败';
-          console.error('❌ 创建 Stripe 支付API调用失败:', apiError);
-          
-          uni.showToast({
-            title: errorMsg,
-            icon: 'none',
-            duration: 3000
-          });
-          return;
-        }
-
-        // 隐藏loading
-        if (loadingShown) {
-          uni.hideLoading();
-          loadingShown = false;
-        }
-
-        // 检查响应
-        if (!res || !res.success) {
-          uni.showToast({
-            title: res?.message || '创建 Stripe 支付失败',
-            icon: 'none',
-            duration: 3000
-          });
-          return;
-        }
-
-        // 检查支付URL
-        if (!res.payUrl) {
-          uni.showToast({
-            title: '支付URL无效，请重试',
-            icon: 'none',
-            duration: 2000
-          });
-          return;
-        }
-
-        console.log('✅ Stripe 支付创建成功');
-        console.log('🔍 payUrl:', res.payUrl);
-
-        // 跳转到 Stripe 支付页面
-        // #ifdef H5
-        try {
-          console.log('🔗 准备跳转到 Stripe 支付页面...');
-          
-          if (typeof window !== 'undefined') {
-            console.log('🔗 使用 window.location.href 跳转');
-            setTimeout(() => {
-              window.location.href = res.payUrl;
-            }, 200);
-          } else {
-            throw new Error('当前环境不支持 window 对象');
-          }
-        } catch (jumpError) {
-          console.error('❌ 跳转失败:', jumpError);
-          uni.showToast({
-            title: '跳转失败：' + jumpError.message,
-            icon: 'none',
-            duration: 3000
-          });
-        }
-        // #endif
-        
-        // #ifdef APP-PLUS
-        try {
-          console.log('📱 App环境：准备打开 Stripe 支付...');
-          
-          if (typeof plus !== 'undefined' && plus.runtime) {
-            plus.runtime.openURL(res.payUrl, (error) => {
-              if (error) {
-                console.error('❌ 打开 Stripe 支付失败:', error);
-                uni.showToast({
-                  title: '打开 Stripe 支付失败',
-                  icon: 'none',
-                  duration: 3000
-                });
-              } else {
-                console.log('✅ Stripe 支付已打开');
-              }
-            });
-          } else {
-            console.error('❌ plus.runtime 不可用');
-            uni.showToast({
-              title: '当前环境不支持打开支付',
-              icon: 'none',
-              duration: 3000
-            });
-          }
-        } catch (appError) {
-          console.error('❌ App环境 Stripe 支付失败:', appError);
-          uni.showToast({
-            title: '打开 Stripe 支付失败，请重试',
-            icon: 'none',
-            duration: 3000
-          });
-        }
-        // #endif
-        
-        // #ifdef MP
-        uni.showModal({
-          title: '支付提示',
-          content: '小程序暂不支持直接支付，请在浏览器中打开链接完成支付',
-          showCancel: false,
-          confirmText: '知道了'
-        });
-        // #endif
-      } catch (error) {
-        if (loadingShown) {
-          try {
-            uni.hideLoading();
-          } catch (e) {
-            // 忽略错误
-          }
-          loadingShown = false;
-        }
-        
-        console.error('❌ 发起 Stripe 支付失败:', error);
-        
-        let errorMsg = '发起 Stripe 支付失败';
-        if (error?.message) {
-          errorMsg = error.message;
-        } else if (error?.data?.message) {
-          errorMsg = error.data.message;
-        } else if (typeof error === 'string') {
-          errorMsg = error;
-        }
-        
-        if (errorMsg.includes('网络') || errorMsg.includes('timeout') || errorMsg.includes('连接')) {
-          errorMsg = '网络连接失败，请检查网络后重试';
-        }
-        
-        uni.showToast({
-          title: errorMsg,
-          icon: 'none',
-          duration: 3000
-        });
-      }
-    }
   }
 };
 </script>
@@ -1406,6 +546,16 @@ export default {
     padding: 6rpx 16rpx;
     border-radius: 8rpx;
     
+    &.status-pendingPayment {
+      background-color: rgba(244, 67, 54, 0.15);
+      
+      .status-text {
+        color: #f44336;
+        font-size: 24rpx;
+        font-weight: 500;
+      }
+    }
+    
     &.status-pendingVisit {
       background-color: rgba(30, 115, 232, 0.15);
       
@@ -1505,19 +655,30 @@ export default {
     
     .price-info {
       padding: 10rpx 20rpx;
-      background-color: #ff9800;
+      background-color: rgba(158,158,158,0.12);
       border-radius: 8rpx;
+      
+      .price-text {
+        font-size: 28rpx;
+        font-weight: 600;
+        color: #666;
+      }
+    }
+    
+    .pay-btn {
+      padding: 12rpx 28rpx;
+      background: linear-gradient(135deg, #ff9800, #f57c00);
+      border-radius: 30rpx;
       cursor: pointer;
       transition: all 0.3s ease;
       
-      /* 点击反馈效果 */
       &:active {
         opacity: 0.7;
         transform: scale(0.95);
       }
       
-      .price-text {
-        font-size: 32rpx;
+      .pay-btn-text {
+        font-size: 28rpx;
         font-weight: 700;
         color: #ffffff;
       }
