@@ -72,6 +72,12 @@ const menuItems = computed(() => {
       permission: null,
     },
     {
+      path: '/doctor-cert',
+      icon: '🏥',
+      label: '医师认证审核',
+      permission: null,
+    },
+    {
       path: '/analytics',
       icon: '📈',
       label: '数据统计',
@@ -92,22 +98,22 @@ const menuItems = computed(() => {
     if (isSuperAdmin.value) {
       return true
     }
-    
+
     // admin 角色也可以看到所有菜单（临时方案，确保admin有完整功能）
     if (checkRole('admin')) {
       return true
     }
-    
+
     // 检查角色限制
     if (item.role && !checkRole(item.role)) {
       return false
     }
-    
+
     // 检查权限限制
     if (item.permission && !checkPermission(item.permission)) {
       return false
     }
-    
+
     return true
   })
 })

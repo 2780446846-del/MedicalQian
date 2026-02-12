@@ -31,6 +31,11 @@ export default defineConfig({
         // 保留 /api 前缀，后端如果不需要可去掉 rewrite
         // rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // 将 /uploads 转发到后端，用于访问上传的图片等静态资源
+      '/uploads': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
     },
   },
 })

@@ -80,7 +80,7 @@
       <!-- 连接状态提示 -->
       <view v-if="!socketConnected" class="connection-status">
         <text>Socket.IO 未连接</text>
-        <text class="connection-hint">请确保后端服务已启动（端口 3000），或检查 utils/config.js 中的地址</text>
+        <text class="connection-hint">请确保后端服务已启动（端口 3000）。真机请连与电脑同一 WiFi，用浏览器打开 http://电脑IP:5173</text>
         <button class="reconnect-btn" :disabled="reconnecting" @click="retrySocketConnection">
           {{ reconnecting ? '连接中...' : '重新连接' }}
         </button>

@@ -7,7 +7,7 @@
         </view>
         <view class="user-info flex-1 ml-[20rpx] text-white">
           <view class="phone text-[32rpx] font-bold">{{ displayName }}</view>
-          <view class="role-tag inline-flex items-center justify-center mt-[6rpx] px-[14rpx] py-[6rpx] rounded-full bg-white/20 text-[22rpx]">普通用户</view>
+          <view class="role-tag inline-flex items-center justify-center mt-[6rpx] px-[14rpx] py-[6rpx] rounded-full text-[22rpx]" :class="authStatus === '已认证' ? 'bg-[#4caf50]/30' : 'bg-white/20'">{{ roleLabel }}</view>
         </view>
         <view class="actions flex gap-[18rpx]">
           <view class="action-icon flex items-center justify-center" @click="goSettings">
@@ -73,6 +73,13 @@
         </view>
         <uni-icons type="arrowright" size="18" :color="theme.textColorTertiary"></uni-icons>
       </view>
+      <view class="list-item flex items-center justify-between px-[16rpx] py-[18rpx]" @click="goDoctorCert">
+        <view class="left flex items-center gap-[14rpx] text-[26rpx]">
+          <uni-icons type="auth" size="22" :color="theme.primaryColor"></uni-icons>
+          <text>医师认证</text>
+        </view>
+        <uni-icons type="arrowright" size="18" :color="theme.textColorTertiary"></uni-icons>
+      </view>
       <view class="list-item flex items-center justify-between px-[16rpx] py-[18rpx]" @click="goMessages">
         <view class="left flex items-center gap-[14rpx] text-[26rpx]">
           <uni-icons type="chatbubble" size="22" :color="theme.primaryColor"></uni-icons>
@@ -98,6 +105,7 @@
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import { getCurrentTheme } from '@/utils/theme.js';
 import { getPendingVisitCount } from '@/utils/appointmentStorage.js';
+import { get } from '@/utils/api.js';
 
 export default {
   components: {
@@ -111,7 +119,8 @@ export default {
       username: '',
       phone: '158****1234',
       theme: getCurrentTheme(),
-      pendingVisitCount: 0
+      pendingVisitCount: 0,
+      authStatus: '未认证'
     };
   },
   computed: {
@@ -127,6 +136,9 @@ export default {
         return this.displayPhone;
       }
       return '未登录';
+    },
+    roleLabel() {
+      return this.authStatus === '已认证' ? '认证医师' : '普通用户';
     }
   },
   onShow() {
@@ -167,6 +179,10 @@ export default {
     this.username = userInfo.username || this.username;
     this.nickname = profile.nickname || userInfo.username || this.nickname;
     this.phone = profile.phone || this.phone;
+    this.authStatus = userInfo.authStatus || '未认证';
+    
+    // 从服务器获取最新用户信息（含认证状态）
+    this.fetchUserInfo();
     
     // 更新待就诊数量
     this.updatePendingVisitCount();
@@ -179,6 +195,23 @@ export default {
     uni.$off('themeChange', this.updateTheme);
   },
   methods: {
+    async fetchUserInfo() {
+      const token = uni.getStorageSync('token');
+      if (!token) return;
+      try {
+        const res = await get('/auth/me');
+        if (res && res.success && res.user) {
+          const user = res.user;
+          this.authStatus = user.authStatus || '未认证';
+          // 同步到本地缓存
+          const stored = uni.getStorageSync('userInfo') || {};
+          stored.authStatus = user.authStatus || '未认证';
+          uni.setStorageSync('userInfo', stored);
+        }
+      } catch (e) {
+        // 静默失败，使用本地缓存值
+      }
+    },
     goVip() {
       uni.showToast({ title: '即将开通VIP', icon: 'none' });
     },
@@ -196,6 +229,9 @@ export default {
     },
     goMessages() {
       uni.navigateTo({ url: '/pages/mine/messages' });
+    },
+    goDoctorCert() {
+      uni.navigateTo({ url: '/pages/mine/doctor-cert' });
     },
     goHelp() {
       uni.navigateTo({ url: '/pages/mine/help' });
