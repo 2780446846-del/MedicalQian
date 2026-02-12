@@ -284,7 +284,11 @@ router.beforeEach(async (to, from, next) => {
       if (requiredPermissions || requiredRoles) {
         // 检查角色
         if (requiredRoles && requiredRoles.length > 0) {
-          const roleCodes = requiredRoles.map(r => typeof r === 'string' ? r : r.code)
+          const roleCodes = requiredRoles.map(r => {
+            if (typeof r === 'string') return r
+            if (typeof r === 'object' && r !== null && 'code' in r) return (r as { code: string }).code
+            return String(r)
+          })
           if (!hasRole(roleCodes)) {
             next({
               path: '/',
@@ -296,7 +300,11 @@ router.beforeEach(async (to, from, next) => {
 
         // 检查权限
         if (requiredPermissions && requiredPermissions.length > 0) {
-          const permissionCodes = requiredPermissions.map(p => typeof p === 'string' ? p : p.code)
+          const permissionCodes = requiredPermissions.map(p => {
+            if (typeof p === 'string') return p
+            if (typeof p === 'object' && p !== null && 'code' in p) return (p as { code: string }).code
+            return String(p)
+          })
           if (!hasPermission(permissionCodes, 'any')) {
             next({
               path: '/',
