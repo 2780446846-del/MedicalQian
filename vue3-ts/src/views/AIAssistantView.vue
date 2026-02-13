@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick, watch } from 'vue';
+import { ref, reactive, onMounted, nextTick, watch, computed } from 'vue';
 import { chatService, type ChatSession, type LocalChatMessage } from '../services/ai/chatService';
 import { aiClient } from '../services/ai/apiClient';
 
@@ -18,12 +18,32 @@ const patientId = ref('');
 const selectedSymptoms = reactive<Record<string, string[]>>({});
 const selectedGroup = ref('');
 const abortController = ref<AbortController | null>(null);
+const streamingTimer = ref<ReturnType<typeof setInterval> | null>(null);
+const showThinkingIndicator = computed(() => {
+  const lastMessage = messages.value[messages.value.length - 1];
+  return loading.value && (!lastMessage || lastMessage.role !== 'assistant');
+});
 
 const emergencyGroups: Record<string, string[]> = {
   '成人': ['胸痛', '呼吸困难', '严重出血', '昏迷', '剧烈腹痛', '抽搐', '严重过敏反应', '高烧不退', '头部外伤', '疑似中毒'],
   '儿童': ['高烧不退', '呼吸困难', '抽搐', '腹泻脱水', '过敏反应', '头部外伤', '误食中毒'],
   '孕妇': ['腹痛伴出血', '呼吸困难', '高血压头痛', '胎动异常', '严重呕吐脱水', '过敏反应', '晕厥'],
   '老年人': ['胸痛', '呼吸困难', '意识障碍', '跌倒外伤', '心悸气短', '高热谵妄', '严重过敏反应']
+};
+
+const stopStreamingUpdates = () => {
+  if (streamingTimer.value) {
+    clearInterval(streamingTimer.value);
+    streamingTimer.value = null;
+  }
+};
+
+const startStreamingUpdates = () => {
+  stopStreamingUpdates();
+  streamingTimer.value = setInterval(() => {
+    messages.value = chatService.getSessionHistory();
+    setTimeout(scrollToBottom, 0);
+  }, 120);
 };
 
 const quickTemplates = [
@@ -77,6 +97,8 @@ const handleSendMessage = async (overrideMessage?: string | Event) => {
     messages.value = updatedHistory;
     setTimeout(scrollToBottom, 0);
 
+    startStreamingUpdates();
+
     await sendMessagePromise;
 
     const finalHistory = chatService.getSessionHistory();
@@ -89,6 +111,7 @@ const handleSendMessage = async (overrideMessage?: string | Event) => {
       alert(`发送消息失败: ${err.message}`);
     }
   } finally {
+    stopStreamingUpdates();
     loading.value = false;
     abortController.value = null;
   }
@@ -120,6 +143,7 @@ const handleRegenerate = async () => {
   abortController.value = new AbortController();
 
   try {
+    startStreamingUpdates();
     await chatService.regenerateLastAssistantReply(abortController.value.signal);
     const finalHistory = chatService.getSessionHistory();
     messages.value = finalHistory;
@@ -131,6 +155,7 @@ const handleRegenerate = async () => {
       error.value = '重新生成失败';
     }
   } finally {
+    stopStreamingUpdates();
     loading.value = false;
     abortController.value = null;
   }
@@ -155,10 +180,6 @@ const handleNewSession = () => {
   } catch (error) {
     console.error('创建新会话失败:', error);
   }
-};
-
-const toggleSessionsList = () => {
-  isSessionsListExpanded.value = !isSessionsListExpanded.value;
 };
 
 const handleSwitchSession = (sessionId: string) => {
@@ -226,6 +247,7 @@ const handleCancelGeneration = () => {
     abortController.value = null;
     loading.value = false;
   }
+  stopStreamingUpdates();
 };
 
 const toggleSymptom = (group: string, symptom: string) => {
@@ -274,7 +296,8 @@ const handlePatientQuerySubmit = async () => {
   error.value = null;
 
   try {
-    const aiMessage = await chatService.queryPatientInfo(patientId.value.trim());
+    startStreamingUpdates();
+    await chatService.queryPatientInfo(patientId.value.trim());
     const current = chatService.getCurrentSession();
     if (current) {
       currentSession.value = current;
@@ -288,6 +311,7 @@ const handlePatientQuerySubmit = async () => {
       alert(`查询失败: ${err.message}`);
     }
   } finally {
+    stopStreamingUpdates();
     loading.value = false;
     patientId.value = '';
     showPatientQuery.value = false;
@@ -392,7 +416,7 @@ onMounted(() => {
               </div>
             </div>
 
-            <div v-if="loading" class="chat-message assistant">
+            <div v-if="showThinkingIndicator" class="chat-message assistant">
               <div class="message-avatar assistant-avatar">
                 <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32">
                   <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-1c0-2.33 4.67-3.5 7-3.5s7 1.17 7 3.5v1z"/>

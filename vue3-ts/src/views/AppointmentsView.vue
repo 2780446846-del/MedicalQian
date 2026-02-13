@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { getAppointments } from '../api/appointments'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart, PieChart } from 'echarts/charts'
@@ -136,13 +137,42 @@ const showReminderPanel = ref(false)
 // 搜索关键词
 const searchKeyword = ref('')
 
+// 从后端加载真实预约数据
+const loadAppointments = async () => {
+  try {
+    const res = await getAppointments()
+    if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      const statusMap: Record<string, 'pending' | 'confirmed' | 'cancelled' | 'completed'> = {
+        pendingVisit: 'pending', pendingRate: 'confirmed', rated: 'completed', history: 'completed'
+      }
+      appointments.value = res.data.map((a: { _id: string; doctorName?: string; userId?: string; date?: string; time?: string; status?: string; price?: number }, i: number) => ({
+        id: a._id || `APM-${i}`,
+        patient: {
+          name: a.userId || `患者${i + 1}`,
+          avatar: `https://picsum.photos/seed/p${i}/100/100`,
+          gender: i % 2 === 0 ? '男' as const : '女' as const,
+          age: 25 + (i * 7) % 40,
+          phone: `138****${String(1000 + i).slice(-4)}`
+        },
+        time: `${a.date || ''} ${a.time || ''}`.trim() || '待定',
+        department: '门诊',
+        doctor: a.doctorName || '医生',
+        status: statusMap[a.status || ''] || 'pending'
+      }))
+    }
+  } catch (e) {
+    console.warn('加载预约数据失败，使用默认数据', e)
+  }
+}
+onMounted(() => { loadAppointments() })
+
 // 过滤后的预约列表
 const filteredAppointments = computed(() => {
   if (!searchKeyword.value.trim()) {
     return appointments.value
   }
   const keyword = searchKeyword.value.toLowerCase()
-  return appointments.value.filter(appointment => 
+  return appointments.value.filter(appointment =>
     appointment.patient.name.toLowerCase().includes(keyword) ||
     appointment.id.toLowerCase().includes(keyword) ||
     appointment.department.toLowerCase().includes(keyword) ||
@@ -258,7 +288,7 @@ const barChartOption = ref({
     axisLine: { show: false },
     axisTick: { show: false },
     axisLabel: { fontSize: 12, color: '#666' },
-    splitLine: { 
+    splitLine: {
       lineStyle: { color: '#f0f0f0' },
       show: true
     },
@@ -363,7 +393,7 @@ const generateReminderMessage = (appointment: Appointment): string => {
   if (!doctorInfo) {
     return `【Heal.Care】${appointment.patient.name}，您预约的${appointment.department}${appointment.doctor}就诊时间为${appointment.time}，请提前1小时到达。`
   }
-  
+
   return `【Heal.Care就诊提醒】
 ${appointment.patient.name}，您好！
 
@@ -386,10 +416,10 @@ ${doctorInfo.introduction}
 const sendSMSReminder = async (appointment: Appointment): Promise<boolean> => {
   // 模拟API调用延迟
   await new Promise(resolve => setTimeout(resolve, 500))
-  
+
   const message = generateReminderMessage(appointment)
   console.log(`发送短信到 ${appointment.patient.phone}:`, message)
-  
+
   // 在实际项目中，这里应该调用后端API发送短信
   // const response = await fetch('/api/sms/send', {
   //   method: 'POST',
@@ -398,7 +428,7 @@ const sendSMSReminder = async (appointment: Appointment): Promise<boolean> => {
   //     message: message
   //   })
   // })
-  
+
   return true // 模拟成功
 }
 
@@ -406,10 +436,10 @@ const sendSMSReminder = async (appointment: Appointment): Promise<boolean> => {
 const sendAppPushReminder = async (appointment: Appointment): Promise<boolean> => {
   // 模拟API调用延迟
   await new Promise(resolve => setTimeout(resolve, 300))
-  
+
   const message = generateReminderMessage(appointment)
   console.log(`发送APP推送到 ${appointment.patient.name}:`, message)
-  
+
   // 在实际项目中，这里应该调用后端API发送推送
   // const response = await fetch('/api/push/send', {
   //   method: 'POST',
@@ -419,7 +449,7 @@ const sendAppPushReminder = async (appointment: Appointment): Promise<boolean> =
   //     message: message
   //   })
   // })
-  
+
   return true // 模拟成功
 }
 
@@ -427,10 +457,10 @@ const sendAppPushReminder = async (appointment: Appointment): Promise<boolean> =
 const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'both' = 'both') => {
   const reminderId = `REM-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   const reminderTime = new Date().toLocaleString('zh-CN')
-  
+
   let status: 'sent' | 'failed' = 'sent'
   let message = generateReminderMessage(appointment)
-  
+
   try {
     // 使用推送助手API发送打电话提醒
     const pushApiUrl = 'https://push.spug.cc/send/My5R7m0d7lmV2DgG'
@@ -510,7 +540,7 @@ const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'bot
         message += '\n[APP推送失败]'
       }
     }
-    
+
     // 记录提醒
     reminderRecords.value.unshift({
       id: reminderId,
@@ -522,10 +552,10 @@ const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'bot
       status: status,
       message: message
     })
-    
+
     // 保存到localStorage
     localStorage.setItem('reminderRecords', JSON.stringify(reminderRecords.value))
-    
+
     return status === 'sent'
   } catch (error) {
     console.error('发送提醒失败:', error)
@@ -577,27 +607,27 @@ const checkAndSendReminders = () => {
     if (appointment.status !== 'pending' && appointment.status !== 'confirmed') {
       return
     }
-    
+
     // 解析预约时间
     const appointmentTime = new Date(appointment.time.replace(/\s/, 'T'))
     if (isNaN(appointmentTime.getTime())) {
       return
     }
-    
+
     // 计算提醒时间（就诊前1小时）
     const reminderTime = new Date(appointmentTime.getTime() - 60 * 60 * 1000)
-    
+
     // 检查是否到了提醒时间（允许5分钟误差）
     const timeDiff = now.getTime() - reminderTime.getTime()
     const fiveMinutes = 5 * 60 * 1000
-    
+
     if (timeDiff >= 0 && timeDiff <= fiveMinutes) {
       // 检查是否已经发送过提醒
       const alreadySent = reminderRecords.value.some(
-        record => record.appointmentId === appointment.id && 
+        record => record.appointmentId === appointment.id &&
                   record.status === 'sent'
       )
-      
+
       if (!alreadySent) {
         console.log(`自动发送提醒: ${appointment.patient.name} - ${appointment.time}`)
         sendReminder(appointment, 'both')
@@ -721,7 +751,7 @@ onMounted(async () => {
   reminderCheckInterval = window.setInterval(() => {
     checkAndSendReminders()
   }, 60 * 1000) // 每分钟检查一次
-  
+
   // 立即检查一次
   checkAndSendReminders()
 })
@@ -739,9 +769,9 @@ onMounted(async () => {
           <span v-if="reminderRecords.length > 0" class="reminder-badge">{{ reminderRecords.length }}</span>
         </button>
         <div class="search-box">
-          <input 
-            type="text" 
-            placeholder="搜索预约..." 
+          <input
+            type="text"
+            placeholder="搜索预约..."
             v-model="searchKeyword"
             class="search-input"
           />
@@ -800,9 +830,9 @@ onMounted(async () => {
         <!-- 柱状图 -->
         <div class="chart-container">
           <div class="bar-chart">
-            <v-chart 
-              :option="barChartOption" 
-              autoresize 
+            <v-chart
+              :option="barChartOption"
+              autoresize
               style="height: 180px; width: 100%;"
             />
           </div>
@@ -823,9 +853,9 @@ onMounted(async () => {
         <!-- 折线图 -->
         <div class="chart-container">
           <div class="line-chart">
-            <v-chart 
-              :option="lineChartOption" 
-              autoresize 
+            <v-chart
+              :option="lineChartOption"
+              autoresize
               style="height: 180px; width: 100%;"
             />
           </div>
@@ -846,9 +876,9 @@ onMounted(async () => {
         <!-- 饼图 -->
         <div class="chart-container">
           <div class="pie-chart">
-            <v-chart 
-              :option="pieChartOption" 
-              autoresize 
+            <v-chart
+              :option="pieChartOption"
+              autoresize
               style="height: 200px; width: 100%;"
             />
           </div>
@@ -877,17 +907,17 @@ onMounted(async () => {
         <h3 class="empty-state-title">暂无预约数据</h3>
         <p class="empty-state-text">当前没有任何预约记录，请稍后再试</p>
       </div>
-      
+
       <!-- 预约卡片 -->
-      <div 
-        v-for="appointment in filteredAppointments" 
+      <div
+        v-for="appointment in filteredAppointments"
         :key="appointment.id"
         class="appointment-card"
       >
         <!-- 患者信息 -->
         <div class="patient-info">
-          <img 
-            :src="appointment.patient.avatar" 
+          <img
+            :src="appointment.patient.avatar"
             :alt="appointment.patient.name"
             class="patient-avatar"
           />
@@ -926,7 +956,7 @@ onMounted(async () => {
             {{ getStatusInfo(appointment.status).text }}
           </div>
           <div class="action-buttons">
-            <button 
+            <button
               v-permission="'reminder:send'"
               class="btn btn-reminder"
               :disabled="appointment.status === 'cancelled' || appointment.status === 'completed'"
@@ -936,7 +966,7 @@ onMounted(async () => {
               <span class="btn-icon-small">🔔</span>
               提醒
             </button>
-            <button 
+            <button
               v-permission="'appointment:cancel'"
               class="btn btn-cancel"
               :disabled="appointment.status === 'cancelled' || appointment.status === 'completed'"
@@ -944,7 +974,7 @@ onMounted(async () => {
             >
               取消
             </button>
-            <button 
+            <button
               v-permission="'appointment:accept'"
               class="btn btn-accept"
               :disabled="appointment.status === 'confirmed' || appointment.status === 'completed'"
@@ -984,8 +1014,8 @@ onMounted(async () => {
               <div class="empty-icon">📭</div>
               <div class="empty-text">暂无提醒记录</div>
             </div>
-            <div 
-              v-for="record in reminderRecords" 
+            <div
+              v-for="record in reminderRecords"
               :key="record.id"
               class="reminder-item"
               :class="{ 'reminder-failed': record.status === 'failed' }"
@@ -2159,11 +2189,11 @@ onMounted(async () => {
   .stats-section {
     grid-template-columns: repeat(3, 1fr);
   }
-  
+
   .appointments-list {
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   }
-  
+
   .appointment-card {
     padding: 20px;
   }
@@ -2173,16 +2203,16 @@ onMounted(async () => {
   .stats-section {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .appointments-list {
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   }
-  
+
   .patient-avatar {
     width: 50px;
     height: 50px;
   }
-  
+
   .patient-name {
     font-size: 16px;
   }
@@ -2192,62 +2222,62 @@ onMounted(async () => {
   .appointments-container {
     padding: 16px;
   }
-  
+
   .page-header {
     flex-direction: column;
     align-items: stretch;
     gap: 16px;
   }
-  
+
   .search-input {
     width: 100%;
   }
-  
+
   .appointment-guide {
     padding: 20px;
   }
-  
+
   .guide-content {
     grid-template-columns: 1fr;
     gap: 16px;
   }
-  
+
   .guide-step {
     padding: 16px;
   }
-  
+
   .stats-section {
     grid-template-columns: 1fr;
     gap: 16px;
   }
-  
+
   .stat-card {
     padding: 20px;
   }
-  
+
   .stat-value {
     font-size: 32px;
   }
-  
+
   .appointments-list {
     grid-template-columns: 1fr;
     gap: 16px;
   }
-  
+
   .appointment-card {
     padding: 16px;
   }
-  
+
   .appointment-actions {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .action-buttons {
     margin-left: 0;
     justify-content: stretch;
   }
-  
+
   .btn {
     flex: 1;
     min-width: 0;
@@ -2258,16 +2288,16 @@ onMounted(async () => {
   .page-title {
     font-size: 24px;
   }
-  
+
   .patient-info {
     gap: 12px;
   }
-  
+
   .patient-avatar {
     width: 48px;
     height: 48px;
   }
-  
+
   .appointment-details {
     padding: 12px;
     gap: 12px;

@@ -242,16 +242,39 @@ export class ChatServiceImpl implements ChatService {
 
       console.log('完整的API消息数组:', JSON.stringify(apiMessages, null, 2));
 
-      const aiResponse = await aiClient.sendChatRequest(apiMessages, undefined, signal);
+      let streamingMessage: LocalChatMessage | null = null;
 
-      const aiMessage: LocalChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: aiResponse,
-        timestamp: new Date()
-      };
+      const aiResponse = await aiClient.sendChatRequest(
+        apiMessages,
+        { stream: true },
+        { signal, onToken: (delta) => {
+          if (!streamingMessage) {
+            streamingMessage = {
+              id: `msg-${Date.now()}-assistant`,
+              role: 'assistant',
+              content: delta,
+              timestamp: new Date()
+            };
+            currentSession.messages.push(streamingMessage);
+          } else {
+            streamingMessage.content += delta;
+            streamingMessage.timestamp = new Date();
+          }
+        } }
+      );
 
-      currentSession.messages.push(aiMessage);
+      let aiMessage: LocalChatMessage | null = streamingMessage;
+      if (!aiMessage) {
+        aiMessage = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: aiResponse,
+          timestamp: new Date()
+        };
+        currentSession.messages.push(aiMessage);
+      }
+
+      currentSession.messages = [...currentSession.messages];
       currentSession.updatedAt = new Date();
 
       this.saveToStorage();
@@ -414,15 +437,38 @@ export class ChatServiceImpl implements ChatService {
 
       apiMessages.push(...mappedMessages);
 
-      const aiResponse = await aiClient.sendChatRequest(apiMessages, undefined, signal);
-      const aiMessage: LocalChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: aiResponse,
-        timestamp: new Date()
-      };
+      let streamingMessage: LocalChatMessage | null = null;
+      const aiResponse = await aiClient.sendChatRequest(
+        apiMessages,
+        { stream: true },
+        { signal, onToken: (delta) => {
+          if (!streamingMessage) {
+            streamingMessage = {
+              id: `msg-${Date.now()}-assistant`,
+              role: 'assistant',
+              content: delta,
+              timestamp: new Date()
+            };
+            currentSession.messages.push(streamingMessage);
+          } else {
+            streamingMessage.content += delta;
+            streamingMessage.timestamp = new Date();
+          }
+        } }
+      );
 
-      currentSession.messages.push(aiMessage);
+      let aiMessage: LocalChatMessage | null = streamingMessage;
+      if (!aiMessage) {
+        aiMessage = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: aiResponse,
+          timestamp: new Date()
+        };
+        currentSession.messages.push(aiMessage);
+      }
+
+      currentSession.messages = [...currentSession.messages];
       currentSession.updatedAt = new Date();
       this.saveToStorage();
       return aiMessage;

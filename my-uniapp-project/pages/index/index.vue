@@ -14,8 +14,11 @@
           <input 
             class="search-input" 
             type="text" 
+            v-model="searchKeyword"
             placeholder="搜索医院、科室、疾病、医生"
             placeholder-class="placeholder"
+            confirm-type="search"
+            @confirm="handleSearch"
           />
         </view>
         <view class="chat-icon">
@@ -270,28 +273,15 @@ import ThemeToggle from '@/components/ThemeToggle.vue'
 import { getAllArticles } from '@/utils/articleStorage.js'
 import { API_BASE_URL } from '@/utils/config.js'
 
-// 声明全局变量
 declare const uni: any;
 declare const plus: any;
 declare function getCurrentPages(): any[];
 declare function getApp(): any;
 
-// 检查登录状态
 function checkLogin(): boolean {
   const token = uni.getStorageSync('token')
   if (!token) {
-    // 未登录，跳转到登录页
-    // 使用 reLaunch 确保清除当前页面栈，避免用户通过返回键回到首页
-    uni.reLaunch({
-      url: '/pages/login/login',
-      fail: (err) => {
-        console.error('跳转到登录页失败:', err)
-        // 如果 reLaunch 失败，尝试使用 redirectTo
-        uni.redirectTo({
-          url: '/pages/login/login'
-        })
-      }
-    })
+    uni.reLaunch({ url: '/pages/login/login', fail: () => { uni.redirectTo({ url: '/pages/login/login' }) } })
     return false
   }
   return true
@@ -316,141 +306,60 @@ interface Specialty {
   icon: string
 }
 
-interface Doctor {
-  id: number
-  name: string
-  title: string
-  hospital: string
-  department: string
-  specialties: string
-  avatar: string
-}
-
-interface Article {
-  id: number
-  title: string
-  subtitle: string
-  readCount: string
-  date: string
-  image: string
-  video?: string
-  mediaType?: string
-}
-
-const activeTab = ref('all') // 热门医院分类：all, comprehensive, children, women, orthopedics
+const searchKeyword = ref('')
+const activeTab = ref('all')
 const activeDoctorTab = ref('selected')
-// 当前城市
 const currentCity = ref('北京')
 
-// 医院数据
 const hospitals = ref<Hospital[]>([
-  { 
-    id: 1, 
-    name: '北京积水潭医院', 
-    distance: '3.8km',
-    appointments: '1950',
-    image: '/static/hospital/hospital.png'
-  },
-  { 
-    id: 2, 
-    name: '北京儿童医院', 
-    distance: '5.2km',
-    appointments: '3240',
-    image: '/static/hospital/hospital2.png'
-  },
-  { 
-    id: 3, 
-    name: '北京协和医院', 
-    distance: '2.5km',
-    appointments: '2580',
-    image: '/static/hospital/hospital3.png'
-  },
+  { id: 1, name: '北京积水潭医院', distance: '3.8km', appointments: '1950', image: '/static/hospital/hospital.png' },
+  { id: 2, name: '北京儿童医院', distance: '5.2km', appointments: '3240', image: '/static/hospital/hospital2.png' },
+  { id: 3, name: '北京协和医院', distance: '2.5km', appointments: '2580', image: '/static/hospital/hospital3.png' },
 ])
 
-// 专科数据
 const specialties = ref<Specialty[]>([
-  { id: 1, name: '内科', icon: '🫀' },
-  { id: 2, name: '外科', icon: '💉' },
-  { id: 3, name: '儿科', icon: '👶' },
-  { id: 4, name: '妇产科', icon: '👩‍🍼' },
-  { id: 5, name: '眼科', icon: '👁️' },
-  { id: 6, name: '口腔科', icon: '🦷' },
-  { id: 7, name: '皮肤科', icon: '🩹' },
-  { id: 8, name: '骨科', icon: '🦴' },
-  { id: 9, name: '神经内科', icon: '🧠' },
-  { id: 10, name: '心血管内科', icon: '❤️' },
+  { id: 1, name: '内科', icon: '🫀' }, { id: 2, name: '外科', icon: '💉' },
+  { id: 3, name: '儿科', icon: '👶' }, { id: 4, name: '妇产科', icon: '👩‍🍼' },
+  { id: 5, name: '眼科', icon: '👁️' }, { id: 6, name: '口腔科', icon: '🦷' },
+  { id: 7, name: '皮肤科', icon: '🩹' }, { id: 8, name: '骨科', icon: '🦴' },
+  { id: 9, name: '神经内科', icon: '🧠' }, { id: 10, name: '心血管内科', icon: '❤️' },
 ])
 
-// 医生数据
-const doctors = ref<Doctor[]>([
-  {
-    id: 1,
-    name: '王医生',
-    title: '主任医师',
-    hospital: '北京大学第一医院',
-    department: '心血管内科',
-    specialties: '心血管疾病、心脏病、冠心病、心胸血...',
-    avatar: 'https://randomuser.me/api/portraits/men/1.jpg'
-  },
-  {
-    id: 2,
-    name: '王医生',
-    title: '主任医师',
-    hospital: '北京大学第一医院',
-    department: '心血管内科',
-    specialties: '心血管疾病、心脏病、冠心病、心胸血...',
-    avatar: 'https://randomuser.me/api/portraits/men/2.jpg'
-  },
-  {
-    id: 3,
-    name: '王医生',
-    title: '主任医师',
-    hospital: '北京大学第一医院',
-    department: '心血管内科',
-    specialties: '心血管疾病、心脏病、冠心病、心胸血...',
-    avatar: 'https://randomuser.me/api/portraits/men/3.jpg'
-  },
-  {
-    id: 4,
-    name: '王医生',
-    title: '主任医师',
-    hospital: '北京大学第一医院',
-    department: '心血管内科',
-    specialties: '心血管疾病、心脏病、冠心病、心胸血...',
-    avatar: 'https://randomuser.me/api/portraits/men/4.jpg'
-  },
-  {
-    id: 5,
-    name: '王医生',
-    title: '主任医师',
-    hospital: '北京大学第一医院',
-    department: '心血管内科',
-    specialties: '心血管疾病、心脏病、冠心病、心胸血...',
-    avatar: 'https://randomuser.me/api/portraits/men/5.jpg'
-  }
-])
+const defaultDoctors: Doctor[] = [
+  { id: 1, name: '王医生', title: '主任医师', hospital: '北京大学第一医院', department: '心血管内科', specialties: '心血管疾病、心脏病、冠心病', avatar: 'https://randomuser.me/api/portraits/men/1.jpg' },
+  { id: 2, name: '李医生', title: '副主任医师', hospital: '北京协和医院', department: '内科', specialties: '消化内科、胃肠疾病', avatar: 'https://randomuser.me/api/portraits/women/2.jpg' },
+  { id: 3, name: '张医生', title: '主治医师', hospital: '北京儿童医院', department: '儿科', specialties: '小儿呼吸、发育迟缓', avatar: 'https://randomuser.me/api/portraits/men/3.jpg' },
+]
+const doctors = ref<Doctor[]>(defaultDoctors)
 
-// 医说文章数据（从本地存储加载，只显示前4条）
 const articles = ref<Article[]>([])
 
-// 获取完整文件URL
+// 从后端加载医生列表
+const loadDoctors = async () => {
+  try {
+    const res = await getDoctorList({ pageSize: 10 })
+    if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      doctors.value = res.data.map((d: any) => ({
+        id: d.id || d._id,
+        name: d.name || '医生',
+        title: d.title || '医师',
+        hospital: d.hospital || '本院',
+        department: d.department || '',
+        specialties: d.specialties || '',
+        avatar: d.avatar || `https://randomuser.me/api/portraits/men/${Math.floor(Math.random() * 50)}.jpg`,
+      }))
+    }
+  } catch (e) {
+    console.warn('加载医生列表失败，使用默认数据', e)
+  }
+}
+
 const getFullFileUrl = (pathStr: string): string => {
   if (!pathStr) return ''
-  
   const path = String(pathStr).trim()
-  
-  // 如果已经是完整URL，直接返回
-  if (path.startsWith('http://') || path.startsWith('https://')) {
-    return path
-  }
-  
-  // 如果是静态资源路径，直接返回
-  if (path.startsWith('/static/')) {
-    return path
-  }
-  
-  // 获取后端服务器基础地址
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('/static/')) return path
   let baseOrigin = API_BASE_URL.replace(/\/api$/, '')
+  if (!baseOrigin || baseOrigin === '/' || baseOrigin.startsWith('/')) baseOrigin = 'http://localhost:3000'
   if (!baseOrigin || baseOrigin === '/' || baseOrigin.startsWith('/')) {
     baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
   }
@@ -458,44 +367,26 @@ const getFullFileUrl = (pathStr: string): string => {
   return `${baseOrigin}${path}`
 }
 
-// 获取视频URL
 const getVideoUrl = (url: string | undefined): string => {
   if (!url) return ''
-  
   const urlStr = String(url).trim()
-  
-  // 如果已经是完整URL，直接返回
-  if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) {
-    return urlStr
-  }
-  
-  // 相对路径转换为完整URL
+  if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) return urlStr
   return getFullFileUrl(urlStr)
 }
 
-// 获取视频封面图
 const getVideoPoster = (article: Article): string | null => {
-  // 如果文章有保存的封面图且不是默认值，使用它
   if (article.image && article.image !== '/static/logo.png' && article.image.trim() !== '') {
-    // 如果是完整URL，直接返回
-    if (article.image.startsWith('http://') || article.image.startsWith('https://')) {
-      return article.image
-    }
-    // 否则转换为完整URL
+    if (article.image.startsWith('http://') || article.image.startsWith('https://')) return article.image
     return getFullFileUrl(article.image)
   }
-  // 如果没有封面图，返回null，让video自动使用第一帧
   return null
 }
 
-// 加载文章列表
 const loadArticles = () => {
   try {
-    // 直接从本地存储加载所有文章，只显示前4条
     const savedArticles = getAllArticles()
     articles.value = (savedArticles || []).slice(0, 4) as Article[]
   } catch (error) {
-    console.error('加载文章列表失败:', error)
     articles.value = []
   }
 }
@@ -695,541 +586,147 @@ const navigateToSpecialtyDetail = (specialty: Specialty) => {
       icon: 'none'
     })
   }
-}
-
-// 查看更多专科
-const viewMoreSpecialties = () => {
-  try {
-    uni.navigateTo({
-      url: '/pages/specialty-hospital/index?view=all',
-      fail: (err) => {
-        console.error('页面跳转失败:', err)
-        uni.showToast({
-          title: '页面跳转失败',
-          icon: 'none',
-          duration: 2000
-        })
-      }
-    })
-  } catch (error) {
-    console.error('跳转异常:', error)
-    uni.showToast({
-      title: '页面跳转异常',
-      icon: 'none'
-    })
-  }
-}
-
-// 切换医生分类
-const switchDoctorTab = (tab: string) => {
-  activeDoctorTab.value = tab
-}
-
-// 选择医生
-const selectDoctor = (doctorId: number) => {
-  console.log('选择医生ID:', doctorId)
-}
-
-// 医生预约
-const handleDoctorAppointment = (doctorId: number) => {
-  uni.showToast({
-    title: '预约医生',
-    icon: 'none'
-  })
-  console.log('预约医生ID:', doctorId)
-}
-
-// 预约挂号
-const handleAppointmentRegistration = (doctorId: number) => {
-  uni.showToast({
-    title: '预约挂号',
-    icon: 'none'
-  })
-  console.log('预约挂号医生ID:', doctorId)
-}
-
-// 在线咨询
-const handleOnlineConsultation = (doctorId: number) => {
-  uni.showToast({
-    title: '在线咨询',
-    icon: 'none'
-  })
-  console.log('在线咨询医生ID:', doctorId)
-}
-
-// 查看更多医说
-const viewMoreMedicalTalk = () => {
-  uni.navigateTo({
-    url: '/pages/yishuo/article-list',
-    fail: (err) => {
-      console.error('跳转失败:', err)
-      uni.showToast({
-        title: '跳转失败',
-        icon: 'none'
-      })
-    }
-  })
-}
-
-// 选择文章
-const selectArticle = (articleId: number) => {
-  uni.navigateTo({
-    url: `/pages/yishuo/article-detail?id=${articleId}`,
-    fail: (err) => {
-      console.error('跳转失败:', err)
-      uni.showToast({
-        title: '跳转失败',
-        icon: 'none'
-      })
-    }
-  })
-}
-
-// 切换城市
-const switchCity = () => {
-  try {
-    uni.navigateTo({
-      url: `/pages/city/index?city=${encodeURIComponent(currentCity.value)}`,
-      fail: (err) => {
-        console.error('页面跳转失败:', err)
-        uni.showToast({
-          title: '页面跳转失败，请重新运行项目',
-          icon: 'none',
-          duration: 2000
-        })
-      }
-    })
-  } catch (error) {
-    console.error('跳转异常:', error)
-    uni.showToast({
-      title: '页面跳转异常',
-      icon: 'none'
-    })
-  }
-}
-
-// 更新城市（供城市选择页面调用）
-const updateCity = (cityName: string) => {
-  currentCity.value = cityName
-  // 保存到本地存储
-  uni.setStorageSync('currentCity', cityName)
-}
-
-// 读取城市信息
-const loadCity = () => {
-  const savedCity = uni.getStorageSync('currentCity')
-  if (savedCity) {
-    currentCity.value = savedCity
-  }
-}
-
-// 页面加载时读取保存的城市
-onMounted(() => {
-  // 检查登录状态
-  if (!checkLogin()) {
+  // 搜索医院
+  const matchedHospital = hospitals.value.find((h: Hospital) => h.name.includes(kw))
+  if (matchedHospital) {
+    uni.navigateTo({ url: `/pages/hospital-detail/index?name=${encodeURIComponent(matchedHospital.name)}&id=${matchedHospital.id}` })
     return
   }
+  // 无精确匹配，跳转到科室页面搜索
+  uni.navigateTo({ url: `/pages/doctor/department?keyword=${encodeURIComponent(kw)}` })
+}
+const handleConsult = () => { uni.navigateTo({ url: '/pages/online-consult/index' }) }
+const handleLiveStream = () => { uni.navigateTo({ url: '/pages/live/entrance' }) }
+const handleAppointment = () => { uni.navigateTo({ url: '/pages/doctor/appointment-register' }) }
+const handleOnlineConsult = () => { uni.navigateTo({ url: '/pages/online-consult/index' }) }
+
+const navigateToHospitalDetail = (hospital: Hospital) => {
+  uni.navigateTo({ url: `/pages/hospital-detail/index?name=${encodeURIComponent(hospital.name)}&distance=${encodeURIComponent(hospital.distance)}&id=${hospital.id}` })
+}
+const navigateToSpecialtyDetail = (specialty: Specialty) => {
+  uni.navigateTo({ url: `/pages/specialty-hospital/index?specialty=${encodeURIComponent(specialty.name)}&id=${specialty.id}` })
+}
+const viewMoreSpecialties = () => { uni.navigateTo({ url: '/pages/specialty-hospital/index?view=all' }) }
+const switchDoctorTab = (tab: string) => { activeDoctorTab.value = tab }
+
+const selectDoctor = (doctorId: any) => {
+  uni.navigateTo({ url: `/pages/doctor/detail?id=${doctorId}` })
+}
+const handleDoctorAppointment = (doctorId: any) => {
+  uni.navigateTo({ url: `/pages/doctor/appointment?doctorId=${doctorId}` })
+}
+const handleAppointmentRegistration = (doctorId: any) => {
+  uni.navigateTo({ url: `/pages/doctor/appointment-register?doctorId=${doctorId}` })
+}
+const handleOnlineConsultation = (doctorId: any) => {
+  uni.navigateTo({ url: `/pages/online-consult/index?doctorId=${doctorId}` })
+}
+
+const viewMoreMedicalTalk = () => { uni.navigateTo({ url: '/pages/yishuo/article-list' }) }
+const selectArticle = (articleId: number) => { uni.navigateTo({ url: `/pages/yishuo/article-detail?id=${articleId}` }) }
+
+const switchCity = () => {
+  uni.navigateTo({ url: `/pages/city/index?city=${encodeURIComponent(currentCity.value)}` })
+}
+const loadCity = () => {
+  const savedCity = uni.getStorageSync('currentCity')
+  if (savedCity) currentCity.value = savedCity
+}
+
+onMounted(() => {
+  if (!checkLogin()) return
   loadCity()
-  // 加载文章列表
   loadArticles()
+  loadDoctors()
 })
 
-// 页面卸载时清理事件监听
 onUnmounted(() => {
   // @ts-ignore
   if (typeof uni !== 'undefined' && uni.$off) {
     // @ts-ignore
-    uni.$off('cityChanged')
-    // @ts-ignore
-    uni.$off('articleReadCountUpdated')
-    // @ts-ignore
-    uni.$off('articlesUpdated')
+    uni.$off('cityChanged'); uni.$off('articleReadCountUpdated'); uni.$off('articlesUpdated')
   }
 })
 
-// 使用事件总线监听城市变化（实时更新）
 // @ts-ignore
 if (typeof uni !== 'undefined' && uni.$on) {
   // @ts-ignore
-  uni.$on('cityChanged', (cityName: string) => {
-    currentCity.value = cityName
-    uni.setStorageSync('currentCity', cityName)
-  })
-  
-  // 监听阅读数更新事件
+  uni.$on('cityChanged', (cityName: string) => { currentCity.value = cityName; uni.setStorageSync('currentCity', cityName) })
   // @ts-ignore
   uni.$on('articleReadCountUpdated', (data: { articleId: number, readCount: string }) => {
-    if (data && data.articleId) {
-      const article = articles.value.find(a => a.id === data.articleId)
-      if (article && data.readCount) {
-        article.readCount = data.readCount
-      }
-    }
+    if (data?.articleId) { const a = articles.value.find(x => x.id === data.articleId); if (a) a.readCount = data.readCount }
   })
-  
-  // 监听文章更新事件（当有新文章发布时自动刷新）
   // @ts-ignore
-  uni.$on('articlesUpdated', () => {
-    loadArticles()
-  })
+  uni.$on('articlesUpdated', () => { loadArticles() })
 }
 
-// 页面显示时自动刷新城市（从城市选择页返回时会触发）
-// uni-app 会自动识别 onShow 生命周期钩子
 // @ts-ignore
 function onShow() {
-  // 每次显示页面时检查登录状态
-  if (!checkLogin()) {
-    return
-  }
+  if (!checkLogin()) return
   loadCity()
-  // 重新加载文章列表（可能在其他页面添加了新文章）
   loadArticles()
 }
 </script>
 
 <style lang="scss">
-.container {
-  background-color: var(--bg-color, #ffffff);
-  min-height: 100vh;
-  padding-bottom: 40rpx;
-  transition: background-color 0.3s ease;
-}
+.container { background: #f7f8fa; min-height: 100vh; padding-bottom: 40rpx; }
 
-// 顶部状态栏和头部
 .top-header {
-  background: var(--card-bg, #fff);
-  padding-top: var(--status-bar-height, 44px);
-  transition: background-color 0.3s ease;
-  
-  .status-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10rpx 30rpx;
-    padding-left: 30rpx;
-    padding-right: 30rpx;
-    box-sizing: border-box;
-    font-size: 24rpx;
-    height: 60rpx;
-    
-    .time {
-      font-weight: bold;
-      color: var(--text-color, #333);
-      transition: color 0.3s ease;
+  background: #fff; padding-top: var(--status-bar-height, 44px);
+  .status-bar { height: 20rpx; }
+  .header { display: flex; align-items: center; padding: 16rpx 24rpx; gap: 16rpx;
+    .location { display: flex; align-items: center; gap: 6rpx; white-space: nowrap;
+      .location-text { font-size: 28rpx; color: #333; }
     }
-    
-    .status-icons {
-      display: flex;
-      gap: 10rpx;
-      color: var(--text-color, #333);
-      transition: color 0.3s ease;
+    .search-box { flex: 1; display: flex; align-items: center; background: #f5f5f5; border-radius: 40rpx; padding: 14rpx 20rpx; gap: 10rpx;
+      .search-input { flex: 1; font-size: 26rpx; color: #333; }
+      .placeholder { color: #999; }
     }
-  }
-  
-  .header {
-    display: flex;
-    align-items: center;
-    padding: 20rpx 30rpx;
-    padding-left: 30rpx;
-    padding-right: 30rpx;
-    box-sizing: border-box;
-    gap: 20rpx;
-    
-    .location {
-      display: flex;
-      align-items: center;
-      gap: 8rpx;
-      white-space: nowrap;
-      
-      .location-text {
-        font-size: 28rpx;
-        color: var(--text-color, #333);
-        transition: color 0.3s ease;
-      }
-    }
-    
-    .search-box {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      background: var(--bg-color, #f5f5f5);
-      border-radius: 50rpx;
-      padding: 16rpx 24rpx;
-      gap: 12rpx;
-      transition: background-color 0.3s ease;
-      
-      .search-input {
-        flex: 1;
-        font-size: 26rpx;
-        color: var(--text-color, #333);
-        transition: color 0.3s ease;
-      }
-      
-      .placeholder {
-        color: var(--text-color-tertiary, #999);
-      }
-    }
-    
-    .chat-icon {
-      padding: 8rpx;
-    }
+    .chat-icon { padding: 8rpx; }
   }
 }
 
-// 橙色促销横幅
 .promo-banner {
-  background: linear-gradient(135deg, #FF8C42, #FFA366);
-  margin: 20rpx 30rpx;
-  border-radius: 24rpx;
-  padding: 40rpx;
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 24rpx;
-  
-  .banner-main {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 20rpx;
+  background: linear-gradient(135deg, #4a90e2, #667eea); margin: 16rpx 24rpx; border-radius: 16rpx; padding: 32rpx; overflow: hidden; display: flex; flex-direction: column; gap: 16rpx;
+  .banner-main { display: flex; justify-content: space-between; align-items: center; }
+  .banner-content { flex: 1;
+    .banner-title { font-size: 36rpx; font-weight: bold; color: #fff; margin-bottom: 8rpx; }
+    .banner-subtitle { font-size: 24rpx; color: rgba(255,255,255,0.9); margin-bottom: 4rpx; }
+    .banner-desc { font-size: 22rpx; color: rgba(255,255,255,0.8); margin-bottom: 20rpx; }
+    .consult-btn { background: rgba(255,255,255,0.25); color: #fff; border: 1rpx solid rgba(255,255,255,0.6); border-radius: 40rpx; padding: 10rpx 32rpx; font-size: 26rpx; width: auto; line-height: 1.5; }
   }
-
-  .banner-content {
-    flex: 1;
-    z-index: 2;
-    
-    .banner-title {
-      font-size: 48rpx;
-      font-weight: bold;
-      color: #fff;
-      margin-bottom: 16rpx;
-    }
-    
-    .banner-subtitle {
-      font-size: 28rpx;
-      color: #fff;
-      margin-bottom: 8rpx;
-      opacity: 0.95;
-    }
-    
-    .banner-desc {
-      font-size: 24rpx;
-      color: #fff;
-      margin-bottom: 30rpx;
-      opacity: 0.9;
-    }
-    
-    .consult-btn {
-      background: rgba(255, 255, 255, 0.3);
-      color: #fff;
-      border: 2rpx solid #fff;
-      border-radius: 50rpx;
-      padding: 12rpx 40rpx;
-      font-size: 28rpx;
-      font-weight: bold;
-      width: auto;
-      line-height: 1.5;
-    }
-  }
-  
-  .banner-image {
-    width: 200rpx;
-    height: 200rpx;
-    position: relative;
-    z-index: 1;
-    
-    .doctor-placeholder {
-      font-size: 120rpx;
-      opacity: 0.3;
-    }
-  }
-
-  // 医生直播入口样式
-  .live-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20rpx 28rpx;
-    border-radius: 20rpx;
-    background: rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(6rpx);
-    border: 2rpx solid rgba(255, 255, 255, 0.25);
-  }
-
-  .live-info {
-    display: flex;
-    flex-direction: column;
-    gap: 8rpx;
-  }
-
-  .live-title {
-    font-size: 32rpx;
-    font-weight: bold;
-    color: #ffffff;
-  }
-
-  .live-subtitle {
-    font-size: 24rpx;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .live-status {
-    display: flex;
-    align-items: center;
-    gap: 8rpx;
-  }
-
-  .live-dot {
-    width: 18rpx;
-    height: 18rpx;
-    border-radius: 50%;
-    background: #ff4d4f;
-    box-shadow: 0 0 12rpx rgba(255, 77, 79, 0.9);
-    animation: live-pulse 1.4s infinite ease-in-out;
-  }
-
-  .live-status-text {
-    font-size: 24rpx;
-    color: #ffffff;
-  }
+  .banner-image { width: 140rpx; height: 140rpx; .doctor-placeholder { font-size: 80rpx; opacity: 0.3; } }
+  .live-banner { display: flex; align-items: center; justify-content: space-between; padding: 16rpx 20rpx; border-radius: 12rpx; background: rgba(255,255,255,0.15); }
+  .live-info { display: flex; flex-direction: column; gap: 4rpx; }
+  .live-title { font-size: 28rpx; font-weight: bold; color: #fff; }
+  .live-subtitle { font-size: 22rpx; color: rgba(255,255,255,0.85); }
+  .live-status { display: flex; align-items: center; gap: 6rpx; }
+  .live-dot { width: 14rpx; height: 14rpx; border-radius: 50%; background: #ff4d4f; animation: pulse 1.4s infinite; }
+  .live-status-text { font-size: 22rpx; color: #fff; }
 }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
 
-@keyframes live-pulse {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  70% {
-    transform: scale(1.35);
-    opacity: 0.2;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-// 服务卡片
 .service-cards {
-  display: flex;
-  gap: 20rpx;
-  padding: 0 30rpx;
-  padding-left: 30rpx;
-  padding-right: 30rpx;
-  box-sizing: border-box;
-  padding-left: 30rpx;
-  padding-right: 30rpx;
-  margin-bottom: 40rpx;
-  box-sizing: border-box;
-  
-  .service-card {
-    flex: 1;
-    background: var(--card-bg, #fff);
-    border-radius: 20rpx;
-    padding: 30rpx;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 2rpx 12rpx var(--shadow-color, rgba(0, 0, 0, 0.08));
-    transition: background-color 0.3s ease, box-shadow 0.3s ease;
-    
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12rpx;
-      
-      .card-title {
-        font-size: 32rpx;
-        font-weight: bold;
-        color: var(--text-color, #333);
-        transition: color 0.3s ease;
-      }
+  display: flex; gap: 16rpx; padding: 0 24rpx; margin-bottom: 24rpx;
+  .service-card { flex: 1; background: #fff; border-radius: 12rpx; padding: 24rpx; position: relative; overflow: hidden;
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8rpx;
+      .card-title { font-size: 30rpx; font-weight: bold; color: #333; }
     }
-    
-    .card-subtitle {
-      font-size: 24rpx;
-      color: var(--text-color-secondary, #666);
-      margin-bottom: 16rpx;
-      transition: color 0.3s ease;
+    .card-subtitle { font-size: 22rpx; color: #888; margin-bottom: 12rpx; }
+    .card-tag { display: inline-block; padding: 4rpx 14rpx; border-radius: 16rpx; font-size: 20rpx; color: #fff;
+      &.orange { background: #ff8c42; } &.blue { background: #4a90e2; .lightning { font-size: 20rpx; } }
     }
-    
-    .card-tag {
-      display: inline-flex;
-      align-items: center;
-      padding: 6rpx 16rpx;
-      border-radius: 20rpx;
-      font-size: 20rpx;
-      color: #fff;
-      
-      &.orange {
-        background: #FF8C42;
-      }
-      
-      &.blue {
-        background: #4A90E2;
-        gap: 4rpx;
-        
-        .lightning {
-          font-size: 20rpx;
-        }
-      }
-    }
-    
-    .card-bg-icon {
-      position: absolute;
-      right: 20rpx;
-      bottom: 20rpx;
-      font-size: 80rpx;
-      opacity: 0.1;
-    }
+    .card-bg-icon { position: absolute; right: 16rpx; bottom: 16rpx; font-size: 64rpx; opacity: 0.08; }
   }
 }
 
-// 热门医院
 .hospital-section {
-  margin-bottom: 40rpx;
-  
-  .section-header {
-    padding: 0 30rpx 20rpx;
-    padding-left: 30rpx;
-    padding-right: 30rpx;
-    box-sizing: border-box;
-    
-    .section-title {
-      font-size: 36rpx;
-      font-weight: bold;
-      color: var(--text-color, #333);
-      margin-bottom: 20rpx;
-      display: block;
-      transition: color 0.3s ease;
-    }
-    
-    .category-tabs {
-      white-space: nowrap;
-      /* 隐藏滚动条 */
-      ::-webkit-scrollbar {
-        display: none;
-      }
-      scrollbar-width: none; /* Firefox */
-      -ms-overflow-style: none; /* IE 10+ */
-      
-      .tab-item {
-        display: inline-block;
-        padding: 12rpx 24rpx;
-        margin-right: 16rpx;
-        background: var(--bg-color, #f5f5f5);
-        border-radius: 30rpx;
-        font-size: 26rpx;
-        color: var(--text-color-secondary, #666);
-        transition: background-color 0.3s ease, color 0.3s ease;
-        
-        &.active {
-          background: var(--primary-color, #4A90E2);
-          color: #fff;
-          font-weight: bold;
-        }
+  margin-bottom: 24rpx;
+  .section-header { padding: 0 24rpx 16rpx;
+    .section-title { font-size: 32rpx; font-weight: bold; color: #333; margin-bottom: 16rpx; display: block; }
+    .category-tabs { white-space: nowrap;
+      .tab-item { display: inline-block; padding: 10rpx 20rpx; margin-right: 12rpx; background: #f0f0f0; border-radius: 24rpx; font-size: 24rpx; color: #666;
+        &.active { background: #4a90e2; color: #fff; font-weight: bold; }
       }
     }
   }
@@ -1295,245 +792,56 @@ function onShow() {
           border-radius: 8rpx;
         }
       }
-      
-      .hospital-info {
-        padding: 20rpx;
-        
-        .hospital-name {
-          display: block;
-          font-size: 28rpx;
-          font-weight: bold;
-          color: var(--text-color, #333);
-          margin-bottom: 8rpx;
-          transition: color 0.3s ease;
-        }
-        
-        .hospital-appointments {
-          display: block;
-          font-size: 24rpx;
-          color: var(--text-color-tertiary, #999);
-          transition: color 0.3s ease;
-        }
+      .hospital-info { padding: 14rpx;
+        .hospital-name { display: block; font-size: 26rpx; font-weight: bold; color: #333; margin-bottom: 4rpx; }
+        .hospital-appointments { display: block; font-size: 22rpx; color: #999; }
       }
     }
   }
 }
 
-// 专科专病
 .specialty-section {
-  padding: 0 30rpx 40rpx;
-  
-  .section-header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24rpx;
-    
-    .section-title {
-      font-size: 36rpx;
-      font-weight: bold;
-      color: #333;
-    }
-    
-    .view-more {
-      font-size: 26rpx;
-      color: #999;
-    }
+  padding: 0 24rpx 24rpx;
+  .section-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20rpx;
+    .section-title { font-size: 32rpx; font-weight: bold; color: #333; }
+    .view-more { font-size: 24rpx; color: #999; }
   }
-  
-  .specialty-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 24rpx;
-    
-    .specialty-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12rpx;
-      
-      .specialty-icon {
-        font-size: 48rpx;
-        width: 80rpx;
-        height: 80rpx;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--bg-color, #f8f9fa);
-        border-radius: 16rpx;
-        transition: background-color 0.3s ease;
-      }
-      
-      .specialty-name {
-        font-size: 24rpx;
-        color: var(--text-color, #333);
-        text-align: center;
-        transition: color 0.3s ease;
-      }
+  .specialty-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20rpx;
+    .specialty-item { display: flex; flex-direction: column; align-items: center; gap: 8rpx;
+      .specialty-icon { font-size: 40rpx; width: 72rpx; height: 72rpx; display: flex; align-items: center; justify-content: center; background: #f0f4ff; border-radius: 14rpx; }
+      .specialty-name { font-size: 22rpx; color: #555; text-align: center; }
     }
   }
 }
 
-// 严选专家
 .doctor-section {
-  background-color: var(--bg-color, #f5f5f5);
-  padding: 30rpx 0 40rpx;
-  transition: background-color 0.3s ease;
-  
-  .doctor-tabs {
-    padding: 0 30rpx 20rpx;
-    padding-left: 30rpx;
-    padding-right: 30rpx;
-    box-sizing: border-box;
-    
-    .tabs-scroll {
-      white-space: nowrap;
-      /* 隐藏滚动条 */
-      ::-webkit-scrollbar {
-        display: none;
-      }
-      scrollbar-width: none; /* Firefox */
-      -ms-overflow-style: none; /* IE 10+ */
-      
-      .doctor-tab-item {
-        display: inline-block;
-        padding: 12rpx 24rpx;
-        margin-right: 16rpx;
-        background: var(--card-bg, #fff);
-        border-radius: 30rpx;
-        font-size: 26rpx;
-        color: var(--text-color-secondary, #666);
-        white-space: nowrap;
-        transition: background-color 0.3s ease, color 0.3s ease;
-        
-        &.active {
-          background: var(--primary-color, #4a90e2);
-          color: #fff;
-          font-weight: bold;
-        }
+  background: #f7f8fa; padding: 24rpx 0;
+  .doctor-tabs { padding: 0 24rpx 16rpx;
+    .tabs-scroll { white-space: nowrap;
+      .doctor-tab-item { display: inline-block; padding: 10rpx 20rpx; margin-right: 12rpx; background: #fff; border-radius: 24rpx; font-size: 24rpx; color: #666;
+        &.active { background: #4a90e2; color: #fff; font-weight: bold; }
       }
     }
   }
-  
-  .doctor-list {
-    padding: 0 30rpx;
-  padding-left: 30rpx;
-  padding-right: 30rpx;
-  box-sizing: border-box;
-    
-    .doctor-card {
-      background: var(--card-bg, #fff);
-      border-radius: 16rpx;
-      padding: 30rpx;
-      margin-bottom: 20rpx;
-      position: relative;
-      display: flex;
-      transition: background-color 0.3s ease;
-      
-      .doctor-avatar {
-        width: 120rpx;
-        height: 120rpx;
-        border-radius: 50%;
-        overflow: hidden;
-        margin-right: 24rpx;
-        flex-shrink: 0;
-        background: #f0f0f0;
-        
-        .avatar-img {
-          width: 100%;
-          height: 100%;
-        }
+  .doctor-list { padding: 0 24rpx;
+    .doctor-card { background: #fff; border-radius: 12rpx; padding: 24rpx; margin-bottom: 16rpx; position: relative; display: flex;
+      .doctor-avatar { width: 100rpx; height: 100rpx; border-radius: 50%; overflow: hidden; margin-right: 20rpx; flex-shrink: 0; background: #eee;
+        .avatar-img { width: 100%; height: 100%; }
       }
-      
-      .appointment-btn {
-        position: absolute;
-        top: 30rpx;
-        right: 30rpx;
-        background: #4a90e2;
-        color: #fff;
-        border: none;
-        border-radius: 30rpx;
-        padding: 8rpx 24rpx;
-        font-size: 24rpx;
-        line-height: 1.5;
-        width: auto;
-        height: auto;
-        
-        &::after {
-          border: none;
+      .appointment-btn { position: absolute; top: 24rpx; right: 24rpx; background: #4a90e2; color: #fff; border: none; border-radius: 24rpx; padding: 6rpx 20rpx; font-size: 22rpx; line-height: 1.5; width: auto; height: auto; &::after { border: none; } }
+      .doctor-info { flex: 1; min-width: 0;
+        .doctor-name-row { display: flex; align-items: baseline; margin-bottom: 6rpx;
+          .doctor-name { font-size: 30rpx; font-weight: bold; color: #333; margin-right: 10rpx; }
+          .doctor-title { font-size: 22rpx; color: #888; }
         }
-      }
-      
-      .doctor-info {
-        flex: 1;
-        min-width: 0;
-        
-        .doctor-name-row {
-          display: flex;
-          align-items: baseline;
-          margin-bottom: 8rpx;
-          
-          .doctor-name {
-            font-size: 32rpx;
-            font-weight: bold;
-            color: var(--text-color, #333);
-            margin-right: 12rpx;
-            transition: color 0.3s ease;
-          }
-          
-          .doctor-title {
-            font-size: 24rpx;
-            color: var(--text-color-secondary, #666);
-            transition: color 0.3s ease;
-          }
+        .doctor-hospital { font-size: 24rpx; color: #555; margin-bottom: 2rpx; }
+        .doctor-department { font-size: 22rpx; color: #888; margin-bottom: 8rpx; }
+        .doctor-specialties { font-size: 22rpx; color: #888; margin-bottom: 12rpx; line-height: 1.4;
+          .specialties-label { color: #888; } .specialties-text { color: #555; }
         }
-        
-        .doctor-hospital {
-          font-size: 26rpx;
-          color: var(--text-color, #333);
-          margin-bottom: 4rpx;
-          transition: color 0.3s ease;
-        }
-        
-        .doctor-department {
-          font-size: 24rpx;
-          color: var(--text-color-secondary, #666);
-          margin-bottom: 12rpx;
-          transition: color 0.3s ease;
-        }
-        
-        .doctor-specialties {
-          font-size: 24rpx;
-          color: var(--text-color-secondary, #666);
-          margin-bottom: 16rpx;
-          line-height: 1.5;
-          transition: color 0.3s ease;
-          
-          .specialties-label {
-            color: var(--text-color-secondary, #666);
-            transition: color 0.3s ease;
-          }
-          
-          .specialties-text {
-            color: var(--text-color, #333);
-            transition: color 0.3s ease;
-          }
-        }
-        
-        .doctor-actions {
-          display: flex;
-          gap: 24rpx;
-          
-          .action-item {
-            display: flex;
-            align-items: center;
-            gap: 6rpx;
-            
-            .action-text {
-              font-size: 24rpx;
-              color: var(--primary-color, #4a90e2);
-              transition: color 0.3s ease;
-            }
+        .doctor-actions { display: flex; gap: 20rpx;
+          .action-item { display: flex; align-items: center; gap: 4rpx;
+            .action-text { font-size: 22rpx; color: #4a90e2; }
           }
         }
       }
@@ -1541,115 +849,26 @@ function onShow() {
   }
 }
 
-// 医说
 .medical-talk-section {
-  padding: 40rpx 30rpx;
-  background-color: var(--card-bg, #fff);
-  transition: background-color 0.3s ease;
-  
-  .section-header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24rpx;
-    
-    .section-title {
-      font-size: 36rpx;
-      font-weight: bold;
-      color: var(--text-color, #333);
-      transition: color 0.3s ease;
-    }
-    
-    .view-more {
-      font-size: 26rpx;
-      color: var(--text-color-tertiary, #999);
-      transition: color 0.3s ease;
-    }
+  padding: 24rpx;
+  .section-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16rpx;
+    .section-title { font-size: 32rpx; font-weight: bold; color: #333; }
+    .view-more { font-size: 24rpx; color: #999; }
   }
-  
   .article-list {
-    .article-card {
-      background: var(--card-bg, #fff);
-      border-radius: 16rpx;
-      padding: 30rpx;
-      margin-bottom: 20rpx;
-      display: flex;
-      box-shadow: 0 2rpx 8rpx var(--shadow-color, rgba(0, 0, 0, 0.05));
-      transition: background-color 0.3s ease, box-shadow 0.3s ease;
-      
-      .article-content {
-        flex: 1;
-        min-width: 0;
-        margin-right: 20rpx;
-        
-        .article-title {
-          font-size: 30rpx;
-          font-weight: bold;
-          color: var(--text-color, #333);
-          line-height: 1.5;
-          margin-bottom: 12rpx;
-          display: -webkit-box;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 2;
-          transition: color 0.3s ease;
-          line-clamp: 2;
-          overflow: hidden;
-        }
-        
-        .article-subtitle {
-          font-size: 24rpx;
-          color: var(--text-color-tertiary, #999);
-          line-height: 1.5;
-          margin-bottom: 16rpx;
-          display: -webkit-box;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 1;
-          line-clamp: 1;
-          overflow: hidden;
-          transition: color 0.3s ease;
-        }
-        
-        .article-meta {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          
-          .read-count {
-            font-size: 22rpx;
-            color: var(--text-color-tertiary, #999);
-            transition: color 0.3s ease;
-          }
-          
-          .article-date {
-            font-size: 22rpx;
-            color: var(--text-color-tertiary, #999);
-            transition: color 0.3s ease;
-          }
+    .article-card { background: #fff; border-radius: 12rpx; padding: 20rpx; margin-bottom: 12rpx; display: flex;
+      .article-content { flex: 1; min-width: 0; margin-right: 16rpx;
+        .article-title { font-size: 28rpx; font-weight: bold; color: #333; line-height: 1.4; margin-bottom: 8rpx; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+        .article-subtitle { font-size: 22rpx; color: #999; margin-bottom: 10rpx; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; overflow: hidden; }
+        .article-meta { display: flex; justify-content: space-between;
+          .read-count, .article-date { font-size: 20rpx; color: #bbb; }
         }
       }
-      
-      .article-image {
-        width: 160rpx;
-        height: 160rpx;
-        border-radius: 12rpx;
-        overflow: hidden;
-        flex-shrink: 0;
-        background: #f0f0f0;
-        
-        .article-img {
-          width: 100%;
-          height: 100%;
-        }
-        
-        .article-video-thumb {
-          width: 100%;
-          height: 100%;
-          border-radius: 12rpx;
-        }
+      .article-image { width: 140rpx; height: 140rpx; border-radius: 10rpx; overflow: hidden; flex-shrink: 0; background: #eee;
+        .article-img, .article-video-thumb { width: 100%; height: 100%; }
       }
     }
   }
 }
-
 </style>
 

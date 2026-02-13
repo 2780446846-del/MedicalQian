@@ -65,8 +65,7 @@
                         "UniversalLinks" : "https://static-mp-7a43517d-d8d4-4fa6-bf16-36b1c3fe2485.next.bspapp.com/qq_conn/102824693/"
                     },
                     "univerify" : {}
-                }
-            },
+                }            },
             "icons" : {
                 "android" : {
                     "hdpi" : "unpackage/res/icons/72x72.png",

@@ -1596,517 +1596,83 @@ const handleQQLogin = async () => {
 </script>
 
 <style scoped>
-.login-container {
-  min-height: 100vh;
-  position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 40rpx;
-  background: linear-gradient(160deg, #6366f1 0%, #818cf8 30%, #60a5fa 60%, #38bdf8 100%);
-  overflow: hidden;
-}
-
-/* 隐藏 H5 验证码容器（仅用于挂载弹窗实例） */
-.captcha-container {
-  position: absolute;
-  width: 320px;
-  height: 50px;
-  opacity: 0;
-  pointer-events: none;
-  overflow: hidden;
-  left: -9999px;
-  top: -9999px;
-}
-
-/* 背景装饰 */
-.bg-decoration {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  z-index: 0;
-}
-
-.bg-circle {
-  position: absolute;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
-  animation: float 20s infinite ease-in-out;
-}
-
-.circle-1 {
-  width: 400rpx;
-  height: 400rpx;
-  top: -100rpx;
-  left: -100rpx;
-  animation-delay: 0s;
-}
-
-.circle-2 {
-  width: 300rpx;
-  height: 300rpx;
-  bottom: -50rpx;
-  right: -50rpx;
-  animation-delay: 5s;
-}
-
-.circle-3 {
-  width: 200rpx;
-  height: 200rpx;
-  top: 50%;
-  right: 10%;
-  animation-delay: 10s;
-}
-
-@keyframes float {
-  0%, 100% {
-    transform: translate(0, 0) scale(1);
-  }
-  50% {
-    transform: translate(30rpx, 30rpx) scale(1.1);
-  }
-}
-
-/* 登录卡片 */
-.login-card {
-  position: relative;
-  z-index: 1;
-  width: 100%;
-  max-width: 680rpx;
-  background: rgba(255, 255, 255, 0.97);
-  border-radius: 36rpx;
-  padding: 60rpx 48rpx;
-  box-shadow: 0 24rpx 80rpx rgba(0, 0, 0, 0.12), 0 4rpx 20rpx rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(20rpx);
-}
-
-/* 头部 */
-.login-header {
-  text-align: center;
-  margin-bottom: 50rpx;
-}
-
-.logo-wrapper {
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  width: 128rpx;
-  height: 128rpx;
-  background: linear-gradient(145deg, #6366f1 0%, #8b5cf6 100%);
-  border-radius: 30rpx;
-  margin-bottom: 30rpx;
-  box-shadow: 0 12rpx 36rpx rgba(99, 102, 241, 0.35);
-}
-
-.logo-icon {
-  font-size: 60rpx;
-}
-
-.app-title {
-  font-size: 48rpx;
-  font-weight: 700;
-  color: #1a1a1a;
-  margin-bottom: 10rpx;
-  letter-spacing: 2rpx;
-}
-
-.app-subtitle {
-  font-size: 26rpx;
-  color: #8e8e93;
-  letter-spacing: 1rpx;
-}
-
-/* 登录方式切换 */
-.login-tabs {
-  display: flex;
-  justify-content: space-around;
-  margin-bottom: 40rpx;
-  background: #f5f5f7;
-  border-radius: 16rpx;
-  padding: 8rpx;
-}
-
-.tab-item {
-  flex: 1;
-  text-align: center;
-  padding: 20rpx 0;
-  font-size: 28rpx;
-  color: #8e8e93;
-  border-radius: 12rpx;
-  transition: all 0.3s;
-  font-weight: 500;
-}
-
-.tab-item.active {
-  background: #fff;
-  color: #6366f1;
-  font-weight: 600;
-  box-shadow: 0 2rpx 10rpx rgba(99, 102, 241, 0.18);
-}
-
-/* 表单 */
-.login-form {
-  margin-bottom: 40rpx;
-}
-
-.form-group {
-  margin-bottom: 30rpx;
-}
-
-.input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  background: #f8f9fa;
-  border-radius: 16rpx;
-  padding: 0 24rpx;
-  border: 2rpx solid transparent;
-  transition: all 0.3s;
-}
-
-.input-wrapper:focus-within {
-  background: #fff;
-  border-color: #6366f1;
-  box-shadow: 0 0 0 4rpx rgba(99, 102, 241, 0.1);
-}
-
-.input-icon {
-  font-size: 32rpx;
-  margin-right: 20rpx;
-  flex-shrink: 0;
-}
-
-.form-input {
-  flex: 1;
-  height: 96rpx;
-  font-size: 30rpx;
-  color: #1a1a1a;
-  background: transparent;
-  border: none;
-}
-
-.form-input::placeholder {
-  color: #c7c7cc;
-}
-
-.input-suffix {
-  margin-left: 20rpx;
-  font-size: 32rpx;
-  cursor: pointer;
-}
-
-.code-input-wrapper {
-  padding-right: 8rpx;
-}
-
-.code-input {
-  flex: 1;
-}
-
-.code-button {
-  height: 72rpx;
-  padding: 0 24rpx;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  color: #fff;
-  border: none;
-  border-radius: 36rpx;
-  font-size: 24rpx;
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.code-button:disabled {
-  opacity: 0.5;
-  background: #c7c7cc;
-}
-
-/* 表单选项 */
-.form-options {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 30rpx;
-  font-size: 26rpx;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  color: #8e8e93;
-}
-
-.checkbox-label text {
-  margin-left: 10rpx;
-}
-
-.forgot-password {
-  color: #6366f1;
-  font-weight: 500;
-}
-
-/* 主按钮 */
-.primary-button {
-  width: 100%;
-  height: 96rpx;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
-  color: #fff;
-  border: none;
-  border-radius: 48rpx;
-  font-size: 32rpx;
-  font-weight: 600;
-  margin-bottom: 30rpx;
-  box-shadow: 0 8rpx 28rpx rgba(99, 102, 241, 0.35);
-  transition: all 0.3s;
-  letter-spacing: 2rpx;
-}
-
-.primary-button:active {
-  transform: scale(0.98);
-  box-shadow: 0 4rpx 12rpx rgba(102, 126, 234, 0.2);
-}
-
-.primary-button:disabled {
-  opacity: 0.5;
-  background: #c7c7cc;
-  box-shadow: none;
-}
-
-/* 一键登录按钮 */
-.oneclick-button {
-  width: 100%;
-  height: 88rpx;
-  margin-top: 20rpx;
-  background: #ffffff;
-  border: 2rpx solid #6366f1;
-  border-radius: 44rpx;
-  font-size: 30rpx;
-  color: #6366f1;
-  font-weight: 600;
-  letter-spacing: 2rpx;
-}
-
-.oneclick-button:disabled {
-  opacity: 0.6;
-  color: #9aa0a6;
-  border-color: #d0d0d0;
-}
-
-/* 注册链接 */
-.register-link {
-  text-align: center;
-  font-size: 26rpx;
-  color: #8e8e93;
-}
-
-.link-text {
-  color: #6366f1;
-  font-weight: 500;
-  margin-left: 8rpx;
-}
-
-/* 第三方登录 */
-.third-party-login {
-  margin-top: 50rpx;
-}
-
-.divider {
-  display: flex;
-  align-items: center;
-  margin-bottom: 40rpx;
-}
-
-.divider-line {
-  flex: 1;
-  height: 1rpx;
-  background: linear-gradient(90deg, transparent, #e0e0e5, transparent);
-}
-
-.divider-text {
-  margin: 0 24rpx;
-  font-size: 24rpx;
-  color: #aeaeb2;
-  white-space: nowrap;
-}
-
-.third-party-buttons {
-  display: flex;
-  justify-content: center;
-  gap: 60rpx;
-}
-
-.third-party-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.2s ease, opacity 0.2s;
-}
-
-.third-party-item:active {
-  transform: scale(0.92);
-  opacity: 0.8;
-}
-
-.third-party-item.disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.third-party-icon {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 40rpx;
-  margin-bottom: 14rpx;
-  color: #fff;
-  font-weight: 700;
-  box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.12);
-  transition: box-shadow 0.2s;
-}
-
-.third-party-icon.wechat {
-  background: linear-gradient(145deg, #2dc100 0%, #07c160 50%, #06ad56 100%);
-  font-size: 36rpx;
-}
-
-.third-party-icon.email {
-  background: linear-gradient(145deg, #ff6b35 0%, #f97316 50%, #ea580c 100%);
-  font-size: 38rpx;
-}
-
-.third-party-icon.qq {
-  background: linear-gradient(145deg, #4dc8f8 0%, #12b7f5 50%, #0ea5e9 100%);
-  font-size: 38rpx;
-  font-weight: 800;
-  font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
-}
-
-.third-party-text {
-  font-size: 22rpx;
-  color: #8e8e93;
-  font-weight: 500;
-}
-
-.email-login-tabs {
-  display: flex;
-  background: #f5f5f7;
-  border-radius: 16rpx;
-  padding: 6rpx;
-  margin-bottom: 24rpx;
-}
-
-.email-login-tab {
-  flex: 1;
-  text-align: center;
-  padding: 16rpx 0;
-  font-size: 26rpx;
-  color: #8e8e93;
-  border-radius: 12rpx;
-}
-
-.email-login-tab.active {
-  background: #fff;
-  color: #667eea;
-  font-weight: 600;
-  box-shadow: 0 2rpx 8rpx rgba(102, 126, 234, 0.2);
-}
-
-.code-tip {
-  font-size: 24rpx;
-  color: #8e8e93;
-  margin-top: 12rpx;
-}
-
-/* 错误提示 */
-.error-message {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20rpx;
-  background: #fee;
-  border-radius: 12rpx;
-  font-size: 26rpx;
-  color: #f56565;
-  margin-top: 20rpx;
-}
-
-.error-icon {
-  margin-right: 10rpx;
-  font-size: 32rpx;
-}
-
-/* 注册错误提示 */
-.register-error-message {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20rpx;
-  background: #fee;
-  border-radius: 12rpx;
-  font-size: 26rpx;
-  color: #f56565;
-  margin-bottom: 20rpx;
-}
-
-/* 注册弹窗 */
-.register-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 40rpx;
-}
-
-.register-content {
-  width: 100%;
-  max-width: 680rpx;
-  max-height: 90vh;
-  background: #fff;
-  border-radius: 32rpx;
-  padding: 40rpx;
-  overflow-y: auto;
-}
-
-.register-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 40rpx;
-}
-
-.register-title {
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #1a1a1a;
-}
-
-.close-button {
-  width: 60rpx;
-  height: 60rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 40rpx;
-  color: #8e8e93;
-  border-radius: 50%;
-  background: #f5f5f7;
-  cursor: pointer;
-}
-
-.register-form {
-  margin-top: 20rpx;
-}
+.login-container { min-height: 100vh; position: relative; display: flex; justify-content: center; align-items: center; padding: 40rpx; background: linear-gradient(135deg, #4a90e2, #667eea); overflow: hidden; }
+.captcha-container { position: absolute; width: 320px; height: 50px; opacity: 0; pointer-events: none; overflow: hidden; left: -9999px; top: -9999px; }
+
+.bg-decoration { position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden; z-index: 0; }
+.bg-circle { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.06); }
+.circle-1 { width: 360rpx; height: 360rpx; top: -80rpx; left: -80rpx; }
+.circle-2 { width: 260rpx; height: 260rpx; bottom: -40rpx; right: -40rpx; }
+.circle-3 { width: 180rpx; height: 180rpx; top: 50%; right: 10%; }
+
+.login-card { position: relative; z-index: 1; width: 100%; max-width: 680rpx; background: #fff; border-radius: 24rpx; padding: 48rpx 40rpx; }
+
+.login-header { text-align: center; margin-bottom: 40rpx; }
+.logo-wrapper { display: inline-flex; justify-content: center; align-items: center; width: 110rpx; height: 110rpx; background: #4a90e2; border-radius: 24rpx; margin-bottom: 24rpx; }
+.logo-icon { font-size: 52rpx; }
+.app-title { font-size: 40rpx; font-weight: 700; color: #1a1a1a; margin-bottom: 8rpx; }
+.app-subtitle { font-size: 24rpx; color: #999; }
+
+.login-tabs { display: flex; margin-bottom: 32rpx; background: #f5f5f7; border-radius: 12rpx; padding: 6rpx; }
+.tab-item { flex: 1; text-align: center; padding: 18rpx 0; font-size: 28rpx; color: #999; border-radius: 10rpx; font-weight: 500; }
+.tab-item.active { background: #fff; color: #4a90e2; font-weight: 600; }
+
+.login-form { margin-bottom: 32rpx; }
+.form-group { margin-bottom: 24rpx; }
+.input-wrapper { display: flex; align-items: center; background: #f8f9fa; border-radius: 12rpx; padding: 0 20rpx; border: 2rpx solid transparent; }
+.input-wrapper:focus-within { background: #fff; border-color: #4a90e2; }
+.input-icon { font-size: 28rpx; margin-right: 16rpx; flex-shrink: 0; }
+.form-input { flex: 1; height: 88rpx; font-size: 28rpx; color: #1a1a1a; background: transparent; border: none; }
+.form-input::placeholder { color: #c7c7cc; }
+.input-suffix { margin-left: 16rpx; font-size: 28rpx; }
+
+.code-input-wrapper { padding-right: 8rpx; }
+.code-input { flex: 1; }
+.code-button { height: 64rpx; padding: 0 20rpx; background: #4a90e2; color: #fff; border: none; border-radius: 32rpx; font-size: 22rpx; font-weight: 500; white-space: nowrap; flex-shrink: 0; }
+.code-button:disabled { opacity: 0.5; background: #ccc; }
+
+.form-options { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24rpx; font-size: 24rpx; }
+.checkbox-label { display: flex; align-items: center; color: #999; }
+.checkbox-label text { margin-left: 8rpx; }
+.forgot-password { color: #4a90e2; font-weight: 500; }
+
+.primary-button { width: 100%; height: 88rpx; background: #4a90e2; color: #fff; border: none; border-radius: 44rpx; font-size: 30rpx; font-weight: 600; margin-bottom: 24rpx; }
+.primary-button:active { opacity: 0.85; }
+.primary-button:disabled { opacity: 0.5; background: #ccc; }
+
+.oneclick-button { width: 100%; height: 80rpx; margin-top: 16rpx; background: #fff; border: 2rpx solid #4a90e2; border-radius: 40rpx; font-size: 28rpx; color: #4a90e2; font-weight: 600; }
+.oneclick-button:disabled { opacity: 0.5; color: #999; border-color: #ddd; }
+
+.register-link { text-align: center; font-size: 24rpx; color: #999; }
+.link-text { color: #4a90e2; font-weight: 500; margin-left: 8rpx; }
+
+.third-party-login { margin-top: 40rpx; }
+.divider { display: flex; align-items: center; margin-bottom: 32rpx; }
+.divider-line { flex: 1; height: 1rpx; background: #e8e8e8; }
+.divider-text { margin: 0 20rpx; font-size: 22rpx; color: #bbb; white-space: nowrap; }
+.third-party-buttons { display: flex; justify-content: center; gap: 50rpx; }
+.third-party-item { display: flex; flex-direction: column; align-items: center; }
+.third-party-item:active { opacity: 0.7; }
+.third-party-item.disabled { opacity: 0.5; pointer-events: none; }
+.third-party-icon { width: 88rpx; height: 88rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36rpx; margin-bottom: 10rpx; color: #fff; font-weight: 700; }
+.third-party-icon.wechat { background: #07c160; }
+.third-party-icon.email { background: #f97316; font-size: 34rpx; }
+.third-party-icon.qq { background: #12b7f5; font-size: 34rpx; font-weight: 800; }
+.third-party-text { font-size: 20rpx; color: #999; }
+
+.email-login-tabs { display: flex; background: #f5f5f7; border-radius: 12rpx; padding: 6rpx; margin-bottom: 20rpx; }
+.email-login-tab { flex: 1; text-align: center; padding: 14rpx 0; font-size: 24rpx; color: #999; border-radius: 10rpx; }
+.email-login-tab.active { background: #fff; color: #4a90e2; font-weight: 600; }
+.code-tip { font-size: 22rpx; color: #999; margin-top: 10rpx; }
+
+.error-message { display: flex; align-items: center; justify-content: center; padding: 16rpx; background: #fff0f0; border-radius: 10rpx; font-size: 24rpx; color: #e74c3c; margin-top: 16rpx; }
+.error-icon { margin-right: 8rpx; font-size: 28rpx; }
+.register-error-message { display: flex; align-items: center; justify-content: center; padding: 16rpx; background: #fff0f0; border-radius: 10rpx; font-size: 24rpx; color: #e74c3c; margin-bottom: 16rpx; }
+
+.register-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 40rpx; }
+.register-content { width: 100%; max-width: 680rpx; max-height: 90vh; background: #fff; border-radius: 20rpx; padding: 36rpx; overflow-y: auto; }
+.register-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32rpx; }
+.register-title { font-size: 36rpx; font-weight: 700; color: #1a1a1a; }
+.close-button { width: 56rpx; height: 56rpx; display: flex; align-items: center; justify-content: center; font-size: 36rpx; color: #999; border-radius: 50%; background: #f5f5f7; }
+.register-form { margin-top: 16rpx; }
 </style>
