@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover"
+    />
+    <title>my-uniapp-project</title>
+    <link rel="icon" type="image/png" href="/assets/logo-CnB-hd5m.png" />
+    <link rel="shortcut icon" href="/assets/logo-CnB-hd5m.png" />
+    <!-- 高德地图 JavaScript API -->
+    <!-- 使用 v1.4.15 版本（更稳定，兼容性更好） -->
+    <!-- 如果出现 USERKEY_PLAT_NOMATCH 错误，说明 key 的平台类型不匹配：
+         解决方案：
+         1. 登录高德开放平台控制台：https://console.amap.com/
+         2. 检查 key 类型：需要创建"Web服务(JS API)"类型的 key
+         3. 确保域名白名单包含当前域名（localhost、127.0.0.1、172.20.10.3等）
+         4. 如果使用安全密钥，需要在控制台配置 securityJsCode -->
+    <script type="text/javascript">
+      // 配置高德地图安全密钥（如果需要，从高德地图控制台获取）
+      window._AMapSecurityConfig = {
+        securityJsCode: '', // 如果高德地图要求安全密钥，在这里配置
+      };
+    </script>
+    <!-- 使用 v1.4.15 版本，移除不必要的插件，只保留核心功能 -->
+    <script type="text/javascript" src="https://webapi.amap.com/maps?v=1.4.15&key=2fc9d976ec3939b4a0ed423bdfeb74e5"></script>
+    <script type="module" crossorigin src="/assets/index-C_RUuRVc.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-zfgRzIgr.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- 入口腳本，掛載 uni-app 應用 -->
+  </body>
+</html>
+
+

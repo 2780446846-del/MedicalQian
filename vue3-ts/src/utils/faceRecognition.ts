@@ -149,8 +149,12 @@ export const calculateFaceSimilarity = (
   // 计算欧氏距离
   let distance = 0
   for (let i = 0; i < descriptor1.length; i++) {
-    const diff = descriptor1[i] - descriptor2[i]
-    distance += diff * diff
+    const val1 = descriptor1[i]
+    const val2 = descriptor2[i]
+    if (val1 !== undefined && val2 !== undefined) {
+      const diff = val1 - val2
+      distance += diff * diff
+    }
   }
   distance = Math.sqrt(distance)
 

@@ -1311,7 +1311,7 @@ async function selectPatient(patient: Patient) {
         count: sortedMessages.length,
         patientId: patient.id,
         doctorId: doctor.id,
-        messages: sortedMessages.map(m => ({
+        messages: sortedMessages.map((m: Message) => ({
           id: m.id,
           sender: m.sender,
           content: m.content?.substring(0, 30),

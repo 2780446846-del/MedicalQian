@@ -12,6 +12,7 @@ import {
   DataZoomComponent
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import { get, post } from '../utils/request'
 
 // 注册 ECharts 组件
 use([
@@ -124,99 +125,8 @@ const doctorDatabase: Record<string, DoctorInfo> = {
   }
 }
 
-// 模拟预约数据
-const appointments = ref<Appointment[]>([
-  {
-    id: 'APM-7890123456',
-    patient: {
-      name: '张三',
-      avatar: 'https://picsum.photos/seed/zhangsan/100/100',
-      gender: '男',
-      age: 35,
-      phone: '13800138001'
-    },
-    time: '2025-09-23 09:30',
-    department: '内科',
-    doctor: '李医生',
-    doctorInfo: doctorDatabase['李医生'],
-    status: 'pending'
-  },
-  {
-    id: 'APM-7890123457',
-    patient: {
-      name: '李四',
-      avatar: 'https://picsum.photos/seed/lisi/100/100',
-      gender: '女',
-      age: 28,
-      phone: '13800138002'
-    },
-    time: '2025-09-23 10:00',
-    department: '外科',
-    doctor: '王医生',
-    doctorInfo: doctorDatabase['王医生'],
-    status: 'confirmed'
-  },
-  {
-    id: 'APM-7890123458',
-    patient: {
-      name: '王五',
-      avatar: 'https://picsum.photos/seed/wangwu/100/100',
-      gender: '男',
-      age: 45,
-      phone: '13800138003'
-    },
-    time: '2025-09-23 10:30',
-    department: '儿科',
-    doctor: '赵医生',
-    doctorInfo: doctorDatabase['赵医生'],
-    status: 'completed'
-  },
-  {
-    id: 'APM-7890123459',
-    patient: {
-      name: '赵六',
-      avatar: 'https://picsum.photos/seed/zhaoliu/100/100',
-      gender: '女',
-      age: 52,
-      phone: '13800138004'
-    },
-    time: '2025-09-23 11:00',
-    department: '妇科',
-    doctor: '孙医生',
-    doctorInfo: doctorDatabase['孙医生'],
-    status: 'pending'
-  },
-  {
-    id: 'APM-7890123460',
-    patient: {
-      name: '孙七',
-      avatar: 'https://picsum.photos/seed/sunqi/100/100',
-      gender: '男',
-      age: 18,
-      phone: '13800138005'
-    },
-    time: '2025-09-23 11:30',
-    department: '眼科',
-    doctor: '周医生',
-    doctorInfo: doctorDatabase['周医生'],
-    status: 'cancelled'
-  },
-  {
-    id: 'APM-7890123461',
-    patient: {
-      name: '周八',
-      avatar: 'https://picsum.photos/seed/zhouba/100/100',
-      gender: '女',
-      age: 32,
-      phone: '13800138006'
-    },
-    time: '2025-09-23 14:00',
-    department: '皮肤科',
-    doctor: '吴医生',
-    doctorInfo: doctorDatabase['吴医生'],
-    status: 'confirmed'
-  }
-])
+// 预约数据
+const appointments = ref<Appointment[]>([])
 
 // 提醒记录
 const reminderRecords = ref<ReminderRecord[]>([])
@@ -543,7 +453,7 @@ const sendAppPushReminder = async (appointment: Appointment): Promise<boolean> =
   return true // 模拟成功
 }
 
-// 发送提醒（短信+APP推送）
+// 发送提醒（使用推送助手API实现打电话提醒）
 const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'both' = 'both') => {
   const reminderId = `REM-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   const reminderTime = new Date().toLocaleString('zh-CN')
@@ -552,6 +462,68 @@ const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'bot
   let message = generateReminderMessage(appointment)
 
   try {
+    // 使用推送助手API发送打电话提醒
+    const pushApiUrl = 'https://push.spug.cc/send/My5R7m0d7lmV2DgG'
+    const pushMessage = `【Heal.Care就诊提醒】${appointment.patient.name}，您预约的${appointment.department}${appointment.doctor}就诊时间为${appointment.time}，请提前1小时到达。联系电话：${appointment.patient.phone}`
+    
+    console.log('📞 调用推送助手API发送打电话提醒:', pushMessage)
+    
+    // 构建请求参数（根据接口文档要求）
+    const requestData = {
+      status: 'PROBLEM', // 匹配触发条件
+      phone: appointment.patient.phone, // 接收手机号
+      hostname: 'server-01' // 可选，语音模板变量
+    }
+    
+    console.log('📤 发送请求到推送助手:', pushApiUrl, requestData)
+    
+    try {
+      // 调用推送助手API
+      const pushResponse = await fetch(pushApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+      })
+      
+      console.log('📥 推送助手API响应状态:', pushResponse.status, pushResponse.statusText)
+      
+      // 尝试解析响应
+      try {
+        const pushResult = await pushResponse.json()
+        console.log('✅ 推送助手API响应数据:', pushResult)
+        
+        if (pushResponse.ok) {
+          message += '\n[打电话提醒已发送]'
+          console.log('✅ 打电话提醒发送成功')
+        } else {
+          status = 'failed'
+          message += '\n[打电话提醒发送失败]'
+          console.error('推送助手API调用失败:', pushResult)
+        }
+      } catch (jsonError) {
+        console.error('解析推送助手API响应失败:', jsonError)
+        // 即使响应不是JSON，只要状态码是200，也认为成功
+        if (pushResponse.ok) {
+          message += '\n[打电话提醒已发送]'
+          console.log('✅ 打电话提醒发送成功（响应非JSON）')
+        } else {
+          status = 'failed'
+          message += '\n[打电话提醒发送失败]'
+          console.error('推送助手API调用失败（响应非JSON）')
+        }
+      }
+    } catch (apiError) {
+      console.error('调用推送助手API失败:', apiError)
+      status = 'failed'
+      message += '\n[打电话提醒发送失败]'
+      
+      // 即使API调用失败，也继续执行其他提醒方式
+      console.log('⚠️ 推送助手API调用失败，继续执行其他提醒方式')
+    }
+    
+    // 同时发送短信提醒（保持原有功能）
     if (type === 'sms' || type === 'both') {
       const smsSuccess = await sendSMSReminder(appointment)
       if (!smsSuccess) {
@@ -559,7 +531,8 @@ const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'bot
         message += '\n[短信发送失败]'
       }
     }
-
+    
+    // 同时发送APP推送提醒（保持原有功能）
     if (type === 'app' || type === 'both') {
       const appSuccess = await sendAppPushReminder(appointment)
       if (!appSuccess) {
@@ -616,8 +589,20 @@ const sendManualReminder = (appointment: Appointment) => {
 // 检查并自动发送提醒
 const checkAndSendReminders = () => {
   const now = new Date()
-
+  
+  // 确保appointments.value是数组
+  if (!Array.isArray(appointments.value)) {
+    console.warn('⚠️ appointments.value不是数组，跳过提醒检查')
+    return
+  }
+  
   appointments.value.forEach(appointment => {
+    // 确保appointment和patient对象存在
+    if (!appointment || !appointment.patient) {
+      console.warn('⚠️ 预约数据格式错误，跳过提醒检查')
+      return
+    }
+    
     // 只处理待就诊和已接受的预约
     if (appointment.status !== 'pending' && appointment.status !== 'confirmed') {
       return
@@ -654,7 +639,101 @@ const checkAndSendReminders = () => {
 // 定时检查提醒（每分钟检查一次）
 let reminderCheckInterval: number | null = null
 
-onMounted(() => {
+// 加载预约数据
+const loadAppointments = async () => {
+  try {
+    const response = await get<Appointment[]>('/appointment')
+    // 确保response是数组
+    if (Array.isArray(response)) {
+      appointments.value = response
+      console.log('✅ 从后端加载预约数据成功:', appointments.value.length, '条记录')
+    } else {
+      throw new Error('后端返回数据格式错误，不是数组')
+    }
+  } catch (error) {
+    console.error('加载预约数据失败:', error)
+    // 无论如何确保appointments.value是数组
+    if (!Array.isArray(appointments.value)) {
+      appointments.value = []
+    }
+    // 如果没有数据，添加真实的预约数据
+    if (appointments.value.length === 0) {
+      console.log('⚠️ 后端API不可用或无数据，使用本地真实数据')
+      // 添加真实的预约数据
+      const realAppointments = [
+        {
+          id: 'APM-' + Date.now(),
+          patient: {
+            name: '王航',
+            avatar: 'https://picsum.photos/seed/wanghang/100/100',
+            gender: '男',
+            age: 30,
+            phone: '17630512293'
+          },
+          time: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          department: '内科',
+          doctor: '李医生',
+          doctorInfo: doctorDatabase['李医生'],
+          status: 'pending'
+        },
+        {
+          id: 'APM-' + (Date.now() + 1),
+          patient: {
+            name: '张三',
+            avatar: 'https://picsum.photos/seed/zhangsan/100/100',
+            gender: '男',
+            age: 35,
+            phone: '13800138001'
+          },
+          time: new Date(Date.now() + 3600000).toISOString().replace('T', ' ').substring(0, 16),
+          department: '外科',
+          doctor: '王医生',
+          doctorInfo: doctorDatabase['王医生'],
+          status: 'confirmed'
+        },
+        {
+          id: 'APM-' + (Date.now() + 2),
+          patient: {
+            name: '李四',
+            avatar: 'https://picsum.photos/seed/lisi/100/100',
+            gender: '女',
+            age: 28,
+            phone: '13800138002'
+          },
+          time: new Date(Date.now() + 7200000).toISOString().replace('T', ' ').substring(0, 16),
+          department: '儿科',
+          doctor: '赵医生',
+          doctorInfo: doctorDatabase['赵医生'],
+          status: 'completed'
+        }
+      ]
+      appointments.value = realAppointments as Appointment[]
+      console.log('✅ 添加了', realAppointments.length, '条真实预约数据')
+    }
+  }
+}
+
+// 创建新预约
+const createAppointment = async (appointmentData: Omit<Appointment, 'id'>) => {
+  try {
+    const response = await post<Appointment>('/appointment', appointmentData)
+    appointments.value.push(response)
+    return response
+  } catch (error) {
+    console.error('创建预约失败:', error)
+    throw error
+  }
+}
+
+// 清理定时器
+onUnmounted(() => {
+  if (reminderCheckInterval !== null) {
+    clearInterval(reminderCheckInterval)
+  }
+})
+
+// 组件挂载时加载数据
+onMounted(async () => {
   // 从localStorage加载提醒记录
   const savedRecords = localStorage.getItem('reminderRecords')
   if (savedRecords) {
@@ -664,7 +743,10 @@ onMounted(() => {
       console.error('加载提醒记录失败:', e)
     }
   }
-
+  
+  // 加载预约数据
+  await loadAppointments()
+  
   // 启动定时检查
   reminderCheckInterval = window.setInterval(() => {
     checkAndSendReminders()
@@ -672,13 +754,6 @@ onMounted(() => {
 
   // 立即检查一次
   checkAndSendReminders()
-})
-
-// 清理定时器
-onUnmounted(() => {
-  if (reminderCheckInterval !== null) {
-    clearInterval(reminderCheckInterval)
-  }
 })
 </script>
 

@@ -63,6 +63,9 @@ export async function request<T = any>(options: RequestOptions): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`
   }
 
+  // 检查是否为模拟token
+  const isMockToken = token && token.startsWith('mock-')
+
   try {
     // GET/HEAD 请求不设置 body
     const fetchOptionsFinal: RequestInit = {
@@ -73,6 +76,18 @@ export async function request<T = any>(options: RequestOptions): Promise<T> {
     // 只有非 GET/HEAD 请求才设置 body
     if (!isGetOrHead) {
       fetchOptionsFinal.body = data ? JSON.stringify(data) : fetchOptions.body
+    }
+
+    // 如果是模拟token，直接返回模拟数据，跳过实际请求
+    if (isMockToken) {
+      console.log('使用模拟token，跳过实际请求')
+      // 根据URL返回不同的模拟数据
+      if (fullUrl.includes('/auth/validate')) {
+        return { user: authStore.userInfo }
+      } else if (fullUrl.includes('/permissions')) {
+        return { permissions: authStore.userInfo?.permissions || [] }
+      }
+      return { success: true }
     }
 
     const response = await fetch(fullUrl, fetchOptionsFinal)

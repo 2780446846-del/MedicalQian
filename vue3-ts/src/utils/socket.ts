@@ -127,11 +127,13 @@ export function connectSocket(userId: string, userInfo: { name: string; avatar?:
         console.error('错误上下文:', error.context)
         console.error('连接URL:', SOCKET_URL)
         console.error('当前传输方式:', (socketInstance as any).io?.engine?.transport?.name || 'unknown')
-        console.error('Socket.IO 状态:', {
-          connected: socketInstance.connected,
-          disconnected: socketInstance.disconnected,
-          id: socketInstance.id
-        })
+        if (socketInstance) {
+          console.error('Socket.IO 状态:', {
+            connected: socketInstance.connected,
+            disconnected: socketInstance.disconnected,
+            id: socketInstance.id
+          })
+        }
         
         // 提供更详细的错误信息
         let errorMessage = error.message || '连接失败'

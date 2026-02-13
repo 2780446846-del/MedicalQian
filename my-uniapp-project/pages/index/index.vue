@@ -95,12 +95,13 @@
           <view class="tab-item" :class="{ active: activeTab === 'orthopedics' }" @click="switchTab('orthopedics')">骨科医院</view>
         </scroll-view>
       </view>
-      <scroll-view class="hospital-scroll" scroll-x show-scrollbar="false">
+      <scroll-view class="hospital-scroll" scroll-x show-scrollbar="false" enable-passive="false">
         <view 
           v-for="hospital in hospitals" 
           :key="hospital.id" 
           class="hospital-card"
-          @click="navigateToHospitalDetail(hospital)"
+          @click.stop="navigateToHospitalDetail(hospital)"
+          @tap.stop="navigateToHospitalDetail(hospital)"
         >
           <view class="hospital-image">
             <image :src="hospital.image" mode="aspectFill" class="hospital-img"></image>
@@ -268,10 +269,9 @@
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
 import { ref, onMounted, onUnmounted } from 'vue'
-import ThemeToggle from '../../components/ThemeToggle.vue'
-import { getAllArticles } from '../../utils/articleStorage'
-import { API_BASE_URL } from '../../utils/config.example'
-import { getDoctorList } from '../../api/doctor.js'
+import ThemeToggle from '@/components/ThemeToggle.vue'
+import { getAllArticles } from '@/utils/articleStorage.js'
+import { API_BASE_URL } from '@/utils/config.js'
 
 declare const uni: any;
 declare const plus: any;
@@ -287,10 +287,24 @@ function checkLogin(): boolean {
   return true
 }
 
-interface Hospital { id: number; name: string; distance: string; appointments: string; image: string }
-interface Specialty { id: number; name: string; icon: string }
-interface Doctor { id: any; name: string; title: string; hospital: string; department: string; specialties: string; avatar: string }
-interface Article { id: number; title: string; subtitle: string; readCount: string; date: string; image: string; video?: string; mediaType?: string }
+interface Hospital {
+  id: number
+  name: string
+  distance: string
+  appointments: string
+  image: string
+  address?: string
+  level?: string
+  phone?: string
+  latitude?: number
+  longitude?: number
+}
+
+interface Specialty {
+  id: number
+  name: string
+  icon: string
+}
 
 const searchKeyword = ref('')
 const activeTab = ref('all')
@@ -377,23 +391,200 @@ const loadArticles = () => {
   }
 }
 
-const switchTab = (tab: string) => { activeTab.value = tab }
-const handleSearch = () => {
-  const kw = (searchKeyword.value || '').trim()
-  if (!kw) return
-  // 搜索医生列表中的匹配项
-  const matchedDoctor = doctors.value.find((d: Doctor) => 
-    d.name.includes(kw) || d.department.includes(kw) || d.specialties.includes(kw) || d.hospital.includes(kw)
-  )
-  if (matchedDoctor) {
-    uni.navigateTo({ url: `/pages/doctor/detail?id=${matchedDoctor.id}` })
-    return
+// 切换分类
+const switchTab = (tab: string) => {
+  console.log('点击切换分类:', tab)
+  try {
+    activeTab.value = tab
+    // 根据分类筛选医院数据（可以根据实际需求实现）
+    console.log('切换到分类:', tab)
+  } catch (error) {
+    console.error('切换分类失败:', error)
   }
-  // 搜索科室
-  const matchedSpec = specialties.value.find((s: Specialty) => s.name.includes(kw))
-  if (matchedSpec) {
-    uni.navigateTo({ url: `/pages/specialty-hospital/index?specialty=${encodeURIComponent(matchedSpec.name)}&id=${matchedSpec.id}` })
-    return
+}
+
+// 立即咨询
+const handleConsult = () => {
+  console.log('点击立即咨询')
+  try {
+    uni.navigateTo({
+      url: '/pages/online-consult/index',
+      success: () => {
+        console.log('跳转到在线问诊成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
+}
+
+// 医生直播 - 跳转到直播入口页面
+const handleLiveStream = () => {
+  console.log('点击医生直播')
+  try {
+    uni.navigateTo({
+      url: '/pages/live/entrance',
+      success: () => {
+        console.log('跳转到直播入口成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
+}
+
+// 预约挂号
+const handleAppointment = () => {
+  console.log('点击预约挂号')
+  try {
+    uni.navigateTo({
+      url: '/pages/doctor/appointment-register',
+      success: () => {
+        console.log('跳转到预约挂号成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
+}
+
+// 在线问诊
+const handleOnlineConsult = () => {
+  console.log('点击在线问诊')
+  try {
+    uni.navigateTo({
+      url: '/pages/online-consult/index',
+      success: () => {
+        console.log('跳转到在线问诊成功')
+      },
+      fail: (err) => {
+        console.error('跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'error'
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+  }
+}
+
+// 跳转到医院详情页
+const navigateToHospitalDetail = (hospital: Hospital) => {
+  console.log('点击医院卡片:', hospital)
+  
+  try {
+    // 防抖：避免快速重复点击（降低防抖时间，提高响应性）
+    // 注意：第一次点击时 lastClickTime 为 0，所以不会阻止
+    const now = Date.now()
+    if (navigateToHospitalDetail.lastClickTime > 0 && (now - navigateToHospitalDetail.lastClickTime) < 300) {
+      console.log('点击过于频繁，已忽略')
+      return
+    }
+    navigateToHospitalDetail.lastClickTime = now
+    
+    // 确保医院信息完整
+    if (!hospital || !hospital.name) {
+      console.error('医院信息不完整:', hospital)
+      uni.showToast({
+        title: '医院信息不完整',
+        icon: 'error',
+        duration: 2000
+      })
+      return
+    }
+    
+    // 添加点击反馈
+    uni.vibrateShort({
+      type: 'light'
+    }).catch(() => {
+      // 如果设备不支持震动，忽略错误
+    })
+    
+    // 构建URL参数，包含所有必要的医院信息
+    const params = new URLSearchParams()
+    params.append('name', hospital.name)
+    params.append('id', String(hospital.id || ''))
+    if (hospital.distance) params.append('distance', hospital.distance)
+    if (hospital.address) params.append('address', hospital.address)
+    if (hospital.level) params.append('level', hospital.level)
+    if (hospital.image) params.append('image', hospital.image)
+    if (hospital.phone) params.append('phone', hospital.phone)
+    if (hospital.latitude) params.append('latitude', String(hospital.latitude))
+    if (hospital.longitude) params.append('longitude', String(hospital.longitude))
+    
+    const url = `/pages/hospital-detail/index?${params.toString()}`
+    console.log('准备跳转到医院详情页:', url)
+    console.log('医院信息:', hospital)
+    
+    uni.navigateTo({
+      url: url,
+      success: () => {
+        console.log('页面跳转成功')
+      },
+      fail: (err) => {
+        console.error('页面跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败，请重试',
+          icon: 'error',
+          duration: 2000
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+    uni.showToast({
+      title: '页面跳转异常',
+      icon: 'error',
+      duration: 2000
+    })
+  }
+}
+// 添加防抖时间戳
+navigateToHospitalDetail.lastClickTime = 0
+
+// 跳转到专科详情页
+const navigateToSpecialtyDetail = (specialty: Specialty) => {
+  try {
+    uni.navigateTo({
+      url: `/pages/specialty-hospital/index?specialty=${encodeURIComponent(specialty.name)}&id=${specialty.id}`,
+      fail: (err) => {
+        console.error('页面跳转失败:', err)
+        uni.showToast({
+          title: '页面跳转失败',
+          icon: 'none',
+          duration: 2000
+        })
+      }
+    })
+  } catch (error) {
+    console.error('跳转异常:', error)
+    uni.showToast({
+      title: '页面跳转异常',
+      icon: 'none'
+    })
   }
   // 搜索医院
   const matchedHospital = hospitals.value.find((h: Hospital) => h.name.includes(kw))
@@ -539,12 +730,67 @@ function onShow() {
       }
     }
   }
-  .hospital-scroll { white-space: nowrap; padding: 0 24rpx;
-    .hospital-card { display: inline-block; width: 260rpx; margin-right: 16rpx; background: #fff; border-radius: 12rpx; overflow: hidden;
-      .hospital-image { position: relative; width: 100%; height: 180rpx; background: #eee;
-        .hospital-img { width: 100%; height: 100%; }
-        .hospital-badge { position: absolute; top: 8rpx; left: 8rpx; background: rgba(255,140,66,0.9); color: #fff; font-size: 18rpx; padding: 2rpx 10rpx; border-radius: 6rpx; }
-        .hospital-distance { position: absolute; top: 8rpx; right: 8rpx; background: rgba(0,0,0,0.5); color: #fff; font-size: 18rpx; padding: 2rpx 10rpx; border-radius: 6rpx; }
+  
+  .hospital-scroll {
+    white-space: nowrap;
+    padding: 0 30rpx;
+  padding-left: 30rpx;
+  padding-right: 30rpx;
+  box-sizing: border-box;
+    /* 隐藏滚动条 */
+    ::-webkit-scrollbar {
+      display: none;
+    }
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE 10+ */
+    
+    .hospital-card {
+      display: inline-block;
+      width: 280rpx;
+      margin-right: 20rpx;
+      background: var(--card-bg, #fff);
+      border-radius: 16rpx;
+      overflow: hidden;
+      box-shadow: 0 2rpx 8rpx var(--shadow-color, rgba(0, 0, 0, 0.08));
+      transition: background-color 0.3s ease, box-shadow 0.3s ease;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      position: relative;
+      z-index: 1;
+      
+      .hospital-image {
+        position: relative;
+        width: 100%;
+        height: 200rpx;
+        background: #f0f0f0;
+        
+        .hospital-img {
+          width: 100%;
+          height: 100%;
+        }
+        
+        .hospital-badge {
+          position: absolute;
+          top: 12rpx;
+          left: 12rpx;
+          background: rgba(255, 140, 66, 0.9);
+          color: #fff;
+          font-size: 20rpx;
+          padding: 4rpx 12rpx;
+          border-radius: 8rpx;
+        }
+        
+        .hospital-distance {
+          position: absolute;
+          top: 12rpx;
+          right: 12rpx;
+          background: rgba(0, 0, 0, 0.5);
+          color: #fff;
+          font-size: 20rpx;
+          padding: 4rpx 12rpx;
+          border-radius: 8rpx;
+        }
       }
       .hospital-info { padding: 14rpx;
         .hospital-name { display: block; font-size: 26rpx; font-weight: bold; color: #333; margin-bottom: 4rpx; }

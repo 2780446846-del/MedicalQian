@@ -12,13 +12,11 @@ const MAX_QUEUE_SIZE = 10 // 队列最大长度
 const SEND_INTERVAL = 5000 // 5秒发送一次
 
 // 是否启用埋点：
-// - 本地开发/H5 环境下为了避免跨域报错，可以关闭
+// - 本地开发/H5/手机端 环境下为了避免连接本地服务器报错，可以关闭
 // - 真正上线并正确配置后端 CORS 后再改为 true
-// #ifdef H5
-const ENABLE_TRACKING = false
-// #endif
-// #ifndef H5
-const ENABLE_TRACKING = true
+let ENABLE_TRACKING = false
+// #ifdef PROD
+ENABLE_TRACKING = true
 // #endif
 
 /**

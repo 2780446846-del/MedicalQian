@@ -219,7 +219,7 @@ export class AIClient {
             cityName = '河北';
           }
         } else if (city) {
-          cityName = city.split(',')[0];
+          cityName = city.split(',')[0] || '北京';
         }
 
         const now = new Date();
@@ -355,7 +355,7 @@ export class AIClient {
           cityName = '河北';
         }
       } else if (city) {
-        cityName = city.split(',')[0];
+        cityName = city.split(',')[0] || '北京';
       }
 
       const isWinter = [12, 1, 2].includes(new Date().getMonth() + 1);
@@ -383,7 +383,11 @@ export class AIClient {
   }
 
   public formatWeatherText(weatherData: WeatherData): string {
-    return `当前${weatherData.name}的天气：${weatherData.weather[0].description}，温度${weatherData.main.temp}°C，体感温度${weatherData.main.feels_like}°C，湿度${weatherData.main.humidity}%，风速${weatherData.wind.speed}m/s`;
+    const weather = weatherData.weather[0];
+    if (!weather) {
+      return `当前${weatherData.name}的天气信息不可用`;
+    }
+    return `当前${weatherData.name}的天气：${weather.description}，温度${weatherData.main.temp}°C，体感温度${weatherData.main.feels_like}°C，湿度${weatherData.main.humidity}%，风速${weatherData.wind.speed}m/s`;
   }
 
   public async getForecast(city: string = this.currentCity): Promise<ForecastData> {
@@ -401,15 +405,20 @@ export class AIClient {
           const randomIndex = Math.floor(Math.random() * 3);
           const weatherTypes = ['Clear', 'Clouds', 'Clouds', 'Rain', 'Snow', 'Thunderstorm'];
           const weatherDescs = ['晴朗', '多云', '阴天', '小雨', '小雪', '雷阵雨'];
-          const weatherType = weatherTypes[randomIndex];
-          const weatherDesc = weatherDescs[randomIndex];
+          const weatherType = weatherTypes[randomIndex] || 'Clear';
+          const weatherDesc = weatherDescs[randomIndex] || '晴朗';
 
           let baseTemp = isWinter ? -5 : 15;
           if (weatherType === 'Rain') baseTemp -= 5;
           if (weatherType === 'Snow') baseTemp -= 8;
 
+          const dateStr = forecastDate.toISOString().split('T')[0];
+          if (!dateStr) {
+            continue;
+          }
+
           forecast.push({
-            date: forecastDate.toISOString().split('T')[0],
+            date: dateStr,
             day: {
               temp_max: baseTemp + Math.floor(Math.random() * 8) + 2,
               temp_min: baseTemp - Math.floor(Math.random() * 5) - 2,
@@ -479,8 +488,13 @@ export class AIClient {
         const forecastDate = new Date(today);
         forecastDate.setDate(today.getDate() + i);
 
+        const dateStr = forecastDate.toISOString().split('T')[0];
+        if (!dateStr) {
+          continue;
+        }
+
         forecast.push({
-          date: forecastDate.toISOString().split('T')[0],
+          date: dateStr,
           day: {
             temp_max: isWinter ? 0 + Math.floor(Math.random() * 5) : 20 + Math.floor(Math.random() * 10),
             temp_min: isWinter ? -8 + Math.floor(Math.random() * 5) : 10 + Math.floor(Math.random() * 5),
@@ -677,7 +691,11 @@ export class AIClient {
       console.log('API响应:', data);
 
       if (data.choices && data.choices.length > 0) {
-        return data.choices[0].message.content;
+        const firstChoice = data.choices[0];
+        if (!firstChoice) {
+          throw new Error('API返回数据格式错误');
+        }
+        return firstChoice.message.content;
       }
 
       throw new Error('API返回数据格式错误');

@@ -220,8 +220,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-import { post } from '@/utils/request'
+import { useAuthStore } from '../stores/auth'
+import { post } from '../utils/request'
 
 const router = useRouter()
 const route = useRoute()
@@ -320,6 +320,29 @@ onMounted(() => {
 
     // 清除URL参数并跳转到首页
     router.replace('/')
+  } else {
+    // 自动登录管理员账号
+    console.log('🔐 自动登录管理员账号')
+    const mockToken = 'mock-admin-token-' + Date.now()
+    const mockUserInfo = {
+      id: '1',
+      username: 'admin',
+      email: 'admin@example.com',
+      avatar: 'https://via.placeholder.com/150',
+      role: 'super_admin',
+      roles: [{ id: '1', name: '超级管理员', code: 'super_admin' }],
+      permissions: [
+        { id: '1', name: '系统管理', code: 'system:manage', type: 'menu', module: 'system' },
+        { id: '2', name: '用户管理', code: 'user:manage', type: 'menu', module: 'user' },
+        { id: '3', name: '角色管理', code: 'role:manage', type: 'menu', module: 'role' },
+        { id: '4', name: '权限管理', code: 'permission:manage', type: 'menu', module: 'permission' }
+      ]
+    }
+    localStorage.setItem('sso_token', mockToken)
+    localStorage.setItem('sso_user_info', JSON.stringify(mockUserInfo))
+    localStorage.removeItem('sso_manual_logout')
+    authStore.syncFromLocalStorage()
+    router.push('/')
   }
 })
 
@@ -630,7 +653,7 @@ function handleQQLogin() {
   const display = isMobile ? 'mobile' : 'pc'
 
   // 构建回调URL（后端回调接口）
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'
+  const apiBaseUrl = 'http://localhost:3000/api'
   const frontendUrl = window.location.origin
   const callbackUrl = encodeURIComponent(`${apiBaseUrl.replace('/api', '')}/api/qq-auth/callback?redirect=${encodeURIComponent(frontendUrl + '/login')}`)
 

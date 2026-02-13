@@ -73,7 +73,7 @@
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
 import { ref, onMounted, onUnmounted } from 'vue'
-import request from '@/utils/request'
+import request from '../../utils/request.js'
 
 // 声明全局变量
 declare const uni: any;
@@ -97,6 +97,7 @@ const fetchLiveRooms = async () => {
     const res: any = await request({
       url: '/webrtc/rooms',
       method: 'GET',
+      data: {},
       needAuth: false,
       showLoading: false,
       showError: false

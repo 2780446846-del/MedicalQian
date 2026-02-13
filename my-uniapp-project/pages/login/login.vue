@@ -359,10 +359,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { request } from '@/utils/request.js'
-import { setToken, setUserInfo } from '@/utils/auth.js'
-import { startOneClickLogin } from '@/services/oneclick/oneClickLogin.js'
-import captcha from '@/components/captcha4/index.vue'
+import request from '../../utils/request.js'
+import { setToken, setUserInfo } from '../../utils/auth.js'
+import { startOneClickLogin } from '../../services/oneclick/oneClickLogin.js'
+import captcha from '../../components/captcha4/index.vue'
+import { API_BASE_URL } from '../../utils/config.js'
 
 // 当前登录方式
 const currentTab = ref('account') // 'account' | 'phone'
@@ -1014,7 +1015,30 @@ const handleCaptchaSuccess = async (result) => {
       }
     }
   } catch (error) {
-    const message = error?.message || error?.msg || error?.errMsg || '图形验证码验证失败'
+    console.error('❌ 发送验证码异常:', error)
+    console.error('错误详情:', JSON.stringify(error))
+    
+    let message = '发送失败，请检查网络连接'
+    
+    if (error.message) {
+      message = error.message
+    } else if (error.errMsg) {
+      if (error.errMsg.includes('timeout')) {
+        message = '请求超时，请检查网络连接'
+      } else if (error.errMsg.includes('fail')) {
+        const baseOrigin = (API_BASE_URL || 'http://localhost:3000/api').replace(/\/api$/, '')
+        message = `网络请求失败，请检查后端服务是否运行（${baseOrigin}）`
+      } else {
+        message = error.errMsg
+      }
+    } else if (typeof error === 'string') {
+      message = error
+    } else if (error.response) {
+      message = error.response.data?.message || error.response.data?.error || '服务器错误'
+    } else if (error.msg) {
+      message = error.msg
+    }
+    
     uni.showToast({
       title: message,
       icon: 'none',
