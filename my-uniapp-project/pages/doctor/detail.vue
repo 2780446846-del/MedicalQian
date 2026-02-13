@@ -384,10 +384,40 @@ export default {
     this.generateAppointmentSlots();
   },
   methods: {
+    // 检查当前医生是否已收藏
+    checkFavoriteStatus() {
+      const favDoctors = uni.getStorageSync('fav_doctors') || [];
+      const id = this.doctorInfo.id || this.doctorInfo._id;
+      this.isFavorited = favDoctors.some(d => (d.id || d._id) == id);
+    },
     // 根据ID加载医生信息
-    loadDoctorById(doctorId) {
-      // 这里应该从服务器或本地数据中查找
-      // 暂时使用模拟数据，实际应该调用API
+    async loadDoctorById(doctorId) {
+      // 先尝试从后端API获取
+      try {
+        const { get } = require('@/utils/api.js');
+        const res = await get(`/doctor/${doctorId}`);
+        if (res && res.success && res.data) {
+          const d = res.data;
+          this.doctorInfo = {
+            id: d._id || d.id || doctorId,
+            name: d.name || '医生',
+            level: d.title || '医师',
+            hospital: d.hospital || '',
+            dept: d.department || '',
+            goodAt: d.specialties || d.goodAt || '',
+            avatar: d.avatar || `https://randomuser.me/api/portraits/men/${(doctorId % 20) + 1}.jpg`,
+            appointmentCount: d.appointmentCount || 0,
+            consultationCount: d.consultationCount || 0,
+            followCount: d.followCount || 0,
+            introduction: d.introduction || d.goodAt || ''
+          };
+          this.checkFavoriteStatus();
+          return;
+        }
+      } catch (e) {
+        console.warn('后端加载医生失败，使用本地数据:', e);
+      }
+      // 回退到本地模拟数据
       const allDoctors = [
         { id: 1, name: '张医生', level: '主任医师', hospital: '北京大学第一医院', dept: '心血管内科', goodAt: '心血管疾病、心脏病、冠心病', avatar: 'https://randomuser.me/api/portraits/men/1.jpg', appointmentCount: 2312, consultationCount: 542, followCount: '32k' },
         { id: 2, name: '李医生', level: '副主任医师', hospital: '北京协和医院', dept: '神经内科', goodAt: '神经疾病、头痛、失眠', avatar: 'https://randomuser.me/api/portraits/men/2.jpg', appointmentCount: 1856, consultationCount: 432, followCount: '28k' },
@@ -417,6 +447,7 @@ export default {
       } else {
         this.initDefaultDoctor();
       }
+      this.checkFavoriteStatus();
     },
     initDefaultDoctor() {
       this.doctorInfo = {
@@ -609,11 +640,27 @@ export default {
       uni.navigateBack();
     },
     toggleFavorite() {
-      this.isFavorited = !this.isFavorited;
-      uni.showToast({
-        title: this.isFavorited ? '已收藏' : '已取消收藏',
-        icon: 'none'
-      });
+      const favDoctors = uni.getStorageSync('fav_doctors') || [];
+      const id = this.doctorInfo.id || this.doctorInfo._id;
+      if (this.isFavorited) {
+        // 取消收藏
+        const idx = favDoctors.findIndex(d => (d.id || d._id) == id);
+        if (idx > -1) favDoctors.splice(idx, 1);
+        this.isFavorited = false;
+      } else {
+        // 添加收藏
+        favDoctors.unshift({
+          id: id,
+          name: this.doctorInfo.name,
+          avatar: this.doctorInfo.avatar,
+          department: this.doctorInfo.dept,
+          hospital: this.doctorInfo.hospital,
+          desc: this.doctorInfo.level
+        });
+        this.isFavorited = true;
+      }
+      uni.setStorageSync('fav_doctors', favDoctors);
+      uni.showToast({ title: this.isFavorited ? '已收藏' : '已取消收藏', icon: 'none' });
     },
     shareDoctor() {
       uni.showToast({

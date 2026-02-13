@@ -373,6 +373,7 @@
 <script>
 import ThemeToggle from '@/components/ThemeToggle.vue';
 import { getCurrentTheme } from '@/utils/theme.js';
+import { getDoctorList } from '@/api/doctor.js';
 
 	export default {
 	components: {
@@ -863,6 +864,9 @@ import { getCurrentTheme } from '@/utils/theme.js';
 		
 		// 加载城市信息
 		this.loadCity();
+		
+		// 从后端加载医生列表
+		this.loadDoctorsFromAPI();
 	},
 	onHide() {
 		uni.$off('themeChange', this.updateTheme);
@@ -883,6 +887,29 @@ import { getCurrentTheme } from '@/utils/theme.js';
 		}
 	},
 	methods: {
+		async loadDoctorsFromAPI() {
+			try {
+				const res = await getDoctorList({ pageSize: 30 });
+				if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+					this.allDoctorList = res.data.map((d, i) => ({
+						id: d.id || d._id || i + 1,
+						name: d.name || '医生',
+						level: d.title || '医师',
+						hospital: d.hospital || '本院',
+						dept: d.department || '综合科',
+						goodAt: d.specialties || '',
+						avatar: d.avatar || `https://randomuser.me/api/portraits/men/${(i % 20) + 1}.jpg`,
+						price: 50,
+						appointmentCount: 0,
+						rating: 4.5,
+						consultationCount: 0,
+					}));
+					this.doctorList = this.allDoctorList;
+				}
+			} catch (e) {
+				console.warn('从后端加载医生列表失败，使用默认数据', e);
+			}
+		},
 		updateTheme(theme) {
 			try {
 				this.theme = theme || getCurrentTheme();

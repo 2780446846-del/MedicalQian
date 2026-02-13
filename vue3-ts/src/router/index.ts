@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useRbacStore } from '../stores/rbac'
-import { checkRoutePermission } from '../utils/permissions'
+
 import type { Permission, Role } from '../stores/rbac'
 import MainLayout from '../layouts/MainLayout.vue'
 import HomeView from '../views/HomeView.vue'

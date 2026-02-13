@@ -113,7 +113,7 @@ export class ChatServiceImpl implements ChatService {
         if (currentSessionId && this.sessions.has(currentSessionId)) {
           this.currentSessionId = currentSessionId;
         } else if (this.sessions.size > 0) {
-          this.currentSessionId = this.sessions.keys().next().value;
+          this.currentSessionId = this.sessions.keys().next().value ?? null;
         }
       }
     } catch (error) {
@@ -242,16 +242,39 @@ export class ChatServiceImpl implements ChatService {
 
       console.log('完整的API消息数组:', JSON.stringify(apiMessages, null, 2));
 
-      const aiResponse = await aiClient.sendChatRequest(apiMessages, undefined, signal);
+      let streamingMessage: LocalChatMessage | null = null;
 
-      const aiMessage: LocalChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: aiResponse,
-        timestamp: new Date()
-      };
+      const aiResponse = await aiClient.sendChatRequest(
+        apiMessages,
+        { stream: true },
+        { signal, onToken: (delta) => {
+          if (!streamingMessage) {
+            streamingMessage = {
+              id: `msg-${Date.now()}-assistant`,
+              role: 'assistant',
+              content: delta,
+              timestamp: new Date()
+            };
+            currentSession.messages.push(streamingMessage);
+          } else {
+            streamingMessage.content += delta;
+            streamingMessage.timestamp = new Date();
+          }
+        } }
+      );
 
-      currentSession.messages.push(aiMessage);
+      let aiMessage: LocalChatMessage | null = streamingMessage;
+      if (!aiMessage) {
+        aiMessage = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: aiResponse,
+          timestamp: new Date()
+        };
+        currentSession.messages.push(aiMessage);
+      }
+
+      currentSession.messages = [...currentSession.messages];
       currentSession.updatedAt = new Date();
 
       this.saveToStorage();
@@ -303,7 +326,7 @@ export class ChatServiceImpl implements ChatService {
       if (this.currentSessionId === sessionId) {
         const remainingSessions = Array.from(this.sessions.keys());
         if (remainingSessions.length > 0) {
-          this.currentSessionId = remainingSessions[0];
+          this.currentSessionId = remainingSessions[0] ?? null;
         } else {
           this.currentSessionId = null;
         }
@@ -330,7 +353,7 @@ export class ChatServiceImpl implements ChatService {
       throw new Error('当前会话没有消息');
     }
     const last = currentSession.messages[currentSession.messages.length - 1];
-    if (last.role !== 'assistant') {
+    if (!last || last.role !== 'assistant') {
       throw new Error('最后一条消息不是AI回复');
     }
     currentSession.messages.pop();
@@ -414,15 +437,38 @@ export class ChatServiceImpl implements ChatService {
 
       apiMessages.push(...mappedMessages);
 
-      const aiResponse = await aiClient.sendChatRequest(apiMessages, undefined, signal);
-      const aiMessage: LocalChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: aiResponse,
-        timestamp: new Date()
-      };
+      let streamingMessage: LocalChatMessage | null = null;
+      const aiResponse = await aiClient.sendChatRequest(
+        apiMessages,
+        { stream: true },
+        { signal, onToken: (delta) => {
+          if (!streamingMessage) {
+            streamingMessage = {
+              id: `msg-${Date.now()}-assistant`,
+              role: 'assistant',
+              content: delta,
+              timestamp: new Date()
+            };
+            currentSession.messages.push(streamingMessage);
+          } else {
+            streamingMessage.content += delta;
+            streamingMessage.timestamp = new Date();
+          }
+        } }
+      );
 
-      currentSession.messages.push(aiMessage);
+      let aiMessage: LocalChatMessage | null = streamingMessage;
+      if (!aiMessage) {
+        aiMessage = {
+          id: `msg-${Date.now()}-assistant`,
+          role: 'assistant',
+          content: aiResponse,
+          timestamp: new Date()
+        };
+        currentSession.messages.push(aiMessage);
+      }
+
+      currentSession.messages = [...currentSession.messages];
       currentSession.updatedAt = new Date();
       this.saveToStorage();
       return aiMessage;

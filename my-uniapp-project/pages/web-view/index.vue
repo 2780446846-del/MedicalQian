@@ -11,18 +11,20 @@
   </view>
 </template>
 
-<script setup>
+<script setup lang="ts">
+/// <reference path="../../global.d.ts" />
+// @ts-ignore
 import { ref } from 'vue';
 
 const webUrl = ref('');
 const title = ref('网页导航');
 
-// uni-app页面生命周期钩子，不需要从Vue导入
-onLoad((options) => {
+// 页面加载时执行
+function onLoad(options: any) {
   if (options.url) {
     webUrl.value = decodeURIComponent(options.url);
   }
-});
+}
 
 function navigateBack() {
   uni.navigateBack();

@@ -45,7 +45,7 @@
 
     <!-- 分类图标 -->
     <view class="category">
-      <view class="category-item" v-for="(item, index) in categories" :key="index">
+      <view class="category-item" v-for="(item, index) in categories" :key="index" @click="onCategoryClick(item)">
         <view class="category-icon" :style="{backgroundColor: item.bgColor}">
           <!-- 这里可以替换为真实的图标 -->
           <image :src="item.icon" mode="aspectFit"></image>
@@ -84,7 +84,7 @@
                 <view class="progress-fill" :style="{width: medicine.sold}"></view>
               </view>
             </view>
-            <button class="buy-btn">去抢购</button>
+            <button class="buy-btn" @click.stop="addToCart(medicine)">加入购物车</button>
           </view>
         </view>
       </view>
@@ -114,48 +114,24 @@ export default {
       hours: '3',
       minutes: '18',
       seconds: '36',
-      // 分类数据
+      cartCount: 0,
       categories: [
-        { name: '对症找药', icon: '/static/maiyao/buluofen.png', bgColor: '#ffebee' },
-        { name: '常用药物', icon: '/static/maiyao/buluofen.png', bgColor: '#e8f5e9' },
-        { name: '用药回收', icon: '/static/maiyao/buluofen.png', bgColor: '#e3f2fd' },
-        { name: '换季必备', icon: '/static/maiyao/buluofen.png', bgColor: '#fff3e0' },
-        { name: '处方购药', icon: '/static/maiyao/buluofen.png', bgColor: '#f3e5f5' }
+        { name: '对症找药', icon: '/static/maiyao/buluofen.png', bgColor: '#ffebee', keyword: '感冒' },
+        { name: '常用药物', icon: '/static/maiyao/buluofen.png', bgColor: '#e8f5e9', keyword: '常用' },
+        { name: '中西药品', icon: '/static/maiyao/buluofen.png', bgColor: '#e3f2fd', keyword: '中药' },
+        { name: '换季必备', icon: '/static/maiyao/buluofen.png', bgColor: '#fff3e0', keyword: '换季' },
+        { name: '处方购药', icon: '/static/maiyao/buluofen.png', bgColor: '#f3e5f5', keyword: '处方' }
       ],
-      // 限时优惠药品
       limitedMedicines: [
-        {
-          name: '阿瓦斯丁 克隆抗体',
-          price: '168',
-          originalPrice: '198',
-          sold: '68%',
-          image: '/static/maiyao/buluofen.png'
-        },
-        {
-          name: '阿斯匹林 克隆抗体',
-          price: '168',
-          originalPrice: '198',
-          sold: '34%',
-          image: '/static/maiyao/buluofen.png'
-        },
-        {
-          name: 'Achatinin',
-          price: '168',
-          originalPrice: '198',
-          sold: '51%',
-          image: '/static/maiyao/buluofen.png'
-        }
+        { name: '布洛芬缓释胶囊 0.3g*20粒', price: '16.80', originalPrice: '25.00', sold: '78%', image: '/static/maiyao/buluofen.png', spec: '每粒0.3g，每盒20粒', usage: '口服，成人一次1-2粒，一日2次' },
+        { name: '连花清瘟胶囊 0.35g*36粒', price: '28.50', originalPrice: '42.00', sold: '65%', image: '/static/maiyao/buluofen.png', spec: '每粒0.35g，每盒36粒', usage: '口服，一次4粒，一日3次' },
+        { name: '阿莫西林胶囊 0.5g*24粒', price: '12.90', originalPrice: '19.80', sold: '82%', image: '/static/maiyao/buluofen.png', spec: '每粒0.5g，每盒24粒', usage: '口服，成人一次1粒，一日3次' }
       ],
-      // 促销专区
       promotions: [
-        {
-          name: '慢病用药',
-          image: '/static/maiyao/buluofen.png'
-        },
-        {
-          name: '儿童用药',
-          image: '/static/maiyao/buluofen.png'
-        }
+        { name: '慢病用药', image: '/static/maiyao/buluofen.png' },
+        { name: '儿童用药', image: '/static/maiyao/buluofen.png' },
+        { name: '妈妈用药', image: '/static/maiyao/buluofen.png' },
+        { name: '营养保健', image: '/static/maiyao/buluofen.png' }
       ]
     }
   },
@@ -170,10 +146,24 @@ export default {
     }
   },
   methods: {
-    // 搜索
     onSearch(value) {
-      console.log('搜索:', value)
-      // 这里可以添加搜索逻辑
+      if (!value || !value.value) return;
+      uni.showToast({ title: `搜索: ${value.value}`, icon: 'none' });
+    },
+    onCategoryClick(item) {
+      uni.showToast({ title: `正在查看${item.name}`, icon: 'none' });
+    },
+    addToCart(medicine) {
+      this.cartCount++;
+      const cart = uni.getStorageSync('medicine_cart') || [];
+      const existing = cart.find(c => c.name === medicine.name);
+      if (existing) {
+        existing.qty++;
+      } else {
+        cart.push({ ...medicine, qty: 1 });
+      }
+      uni.setStorageSync('medicine_cart', cart);
+      uni.showToast({ title: `已加入购物车(${this.cartCount})`, icon: 'success' });
     },
     // 启动倒计时
     startCountdown() {
@@ -389,6 +379,7 @@ export default {
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 

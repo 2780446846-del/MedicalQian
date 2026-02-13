@@ -4,10 +4,10 @@
  */
 
 // 高德地图Web服务API Key（用于逆地理编码、地点搜索等）
-export const AMAP_WEB_KEY = '2fc9d976ec3939b4a0ed423bdfeb74e5';
+export const AMAP_WEB_KEY = 'aab8394f9ad4c8088514c3a844880440';
 
 // 高德地图JS API Key（用于地图展示）
-export const AMAP_JS_KEY = '2fc9d976ec3939b4a0ed423bdfeb74e5';
+export const AMAP_JS_KEY = 'aab8394f9ad4c8088514c3a844880440';
 
 // 高德地图API基础URL
 export const AMAP_WEB_API_BASE = 'https://restapi.amap.com/v3';

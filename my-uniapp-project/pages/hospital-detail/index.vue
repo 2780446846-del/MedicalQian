@@ -243,14 +243,49 @@
         
         <!-- 交通指南 -->
         <view v-if="activeTab === 'transport'" class="transport-section">
-          <!-- 高德地图组件 -->
+          <!-- 地图组件 -->
           <view class="map-container">
-            <view id="hospitalMap" class="hospital-map"></view>
-            <!-- 导航按钮 -->
+            <!-- APP端和小程序端使用原生地图组件 -->
+            <!-- #ifdef APP-PLUS || MP-WEIXIN || MP-ALIPAY || MP-BAIDU || MP-TOUTIAO || MP-QQ -->
+            <map
+              :latitude="mapLatitude"
+              :longitude="mapLongitude"
+              :markers="mapMarkers"
+              :scale="16"
+              :show-location="true"
+              :enable-zoom="true"
+              :enable-scroll="true"
+              :enable-rotate="false"
+              class="hospital-map"
+            >
+              <!-- 原生 map 上方的覆盖层按钮：必须作为 map 子节点 -->
+              <!-- 使用 @tap 和 @click 双重绑定，确保兼容性，防抖逻辑会防止重复触发 -->
+              <cover-view class="navigate-button" @tap="handleNavigateTap" @click="handleNavigateTap">
+                <cover-view class="navigate-button-inner">
+                  <cover-view class="navigate-text">去导航</cover-view>
+                </cover-view>
+              </cover-view>
+            </map>
+            <!-- #endif -->
+            
+            <!-- H5端使用高德地图 -->
+            <!-- #ifdef H5 -->
+            <view class="hospital-map" id="hospitalMap">
+              <view v-if="!mapLoaded" class="map-placeholder">
+                <uni-icons type="location" size="48" color="#4a90e2"></uni-icons>
+                <text class="map-placeholder-text">正在加载地图...</text>
+                <text class="map-placeholder-subtext">{{ hospital?.address || '医院位置' }}</text>
+              </view>
+            </view>
+            <!-- #endif -->
+            
+            <!-- 导航按钮（H5覆盖层） -->
+            <!-- #ifdef H5 -->
             <view class="navigate-button" @click="navigateToHospital">
               <uni-icons type="navigate" size="20" color="#fff"></uni-icons>
-              <text class="navigate-text">导航</text>
+              <text class="navigate-text">去导航</text>
             </view>
+            <!-- #endif -->
           </view>
           <!-- 交通信息 -->
           <view class="transport-info">
@@ -284,9 +319,11 @@
 <script setup lang="ts">
 /// <reference path="../../global.d.ts" />
 // @ts-ignore
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
+// @ts-ignore
+import { onLoad, onShow, onHide } from '@dcloudio/uni-app'
 import { AMAP_JS_KEY } from '../../utils/amapConfig'
-import { getUserLocationWithErrorHandling, openMapNavigationWithFallback } from '../../utils/location'
+import { openMapNavigation } from '../../utils/location'
 
 // 声明全局变量
 declare const uni: any;
@@ -333,17 +370,42 @@ interface NavTab {
 }
 
 // 页面参数
-let query: any = {}
+const query = ref<any>({})
+
+// 获取页面参数
+const getPageParams = () => {
 try {
-  // 使用全局类型断言访问getCurrentPages
-  // @ts-ignore: getCurrentPages是UniApp全局函数
-  const pages = (globalThis as any).getCurrentPages()
+    // 方法1: 使用标准方式获取当前页面参数
+    const pages = getCurrentPages()
   if (pages && pages.length > 0) {
     const currentPage = pages[pages.length - 1]
-    query = currentPage.options || {}
-  }
+      query.value = currentPage.options || {}
+      console.log('方法1获取参数成功:', query.value)
+    }
+    
+    // 方法2: 如果方法1失败，尝试从uni.getLaunchOptionsSync获取
+    if (Object.keys(query.value).length === 0) {
+      const launchOptions = uni.getLaunchOptionsSync()
+      query.value = launchOptions.query || {}
+      console.log('方法2获取参数成功:', query.value)
+    }
+    
+    // 方法3: 作为最后的备选方案，尝试从URL中解析参数
+    if (Object.keys(query.value).length === 0 && typeof window !== 'undefined' && window.location) {
+      const urlParams = new URLSearchParams(window.location.search)
+      const params: any = {}
+      urlParams.forEach((value, key) => {
+        params[key] = value
+      })
+      query.value = params
+      console.log('方法3获取参数成功:', query.value)
+    }
+    
+    console.log('最终获取到的页面参数:', query.value)
 } catch (e) {
-  query = {} 
+    query.value = {}
+    console.error('获取页面参数失败:', e)
+  }
 }
 
 // 状态管理
@@ -354,6 +416,10 @@ const hospital = ref<Hospital | null>(null)
 const comments = ref<PatientComment[]>([])
 const totalComments = ref<number>(0)
 const averageRating = ref<number>(0)
+// 标记是否正在导航（防止从高德地图返回时重新加载数据）
+const isNavigating = ref<boolean>(false)
+// 记录导航开始的时间戳（用于判断是否刚刚从导航返回）
+const navigateStartTime = ref<number>(0)
 
 // 导航标签
 const activeTab = ref<string>('service')
@@ -365,6 +431,12 @@ const navTabs: NavTab[] = [
   { key: 'intro', label: '医院简介' }
 ]
 
+// 地图相关数据
+const mapLatitude = ref<number>(39.90923)
+const mapLongitude = ref<number>(116.397428)
+const mapLoaded = ref<boolean>(false)
+const mapMarkers = ref<any[]>([])
+
 // 计算医院图片
 const hospitalImage = computed(() => {
   if (hospital.value && hospital.value.image) {
@@ -373,21 +445,80 @@ const hospitalImage = computed(() => {
   return '/static/hospital/hospital.png'
 })
 
+// 更新地图数据
+const updateMapData = () => {
+  if (!hospital.value) return
+  
+  const lat = parseFloat(hospital.value.latitude) || 39.90923
+  const lng = parseFloat(hospital.value.longitude) || 116.397428
+  
+  mapLatitude.value = lat
+  mapLongitude.value = lng
+  
+  // 设置地图标记
+  mapMarkers.value = [{
+    id: 1,
+    latitude: lat,
+    longitude: lng,
+    title: hospital.value.name,
+    iconPath: '/static/marker.png', // 可以使用自定义图标
+    width: 30,
+    height: 30,
+    callout: {
+      content: hospital.value.name,
+      color: '#333',
+      fontSize: 14,
+      borderRadius: 4,
+      bgColor: '#fff',
+      padding: 8,
+      display: 'ALWAYS'
+    }
+  }]
+}
+
 // 获取医院详情
 const fetchHospitalDetail = async () => {
   loading.value = true
   error.value = ''
   
+  // 确保获取最新的页面参数（如果 query 为空，尝试重新获取）
+  if (!query.value || Object.keys(query.value).length === 0) {
+    getPageParams()
+  }
+  
+  // 从URL参数构建医院基本信息（在try块外部定义，以便catch块也能访问）
+  const hospitalName = query.value.name ? decodeURIComponent(String(query.value.name)) : ''
+  const hospitalId = query.value.id ? String(query.value.id) : ''
+  
+  console.log('获取到的医院名称:', hospitalName)
+  console.log('获取到的医院ID:', hospitalId)
+  console.log('完整的 query 参数:', query.value)
+  
+  // 如果没有医院名称，提示错误
+  if (!hospitalName || hospitalName === 'undefined' || hospitalName === 'null') {
+    console.error('未获取到医院名称参数，query.value:', query.value)
+    error.value = '未获取到医院信息，请从列表页重新进入'
+    loading.value = false
+    return
+  }
+  
+  // 构建医院信息（安全地解码参数）
+  const hospitalAddress = query.value.address ? decodeURIComponent(String(query.value.address)) : ''
+  const hospitalLevel = query.value.level ? decodeURIComponent(String(query.value.level)) : '未知'
+  const hospitalImage = query.value.image ? decodeURIComponent(String(query.value.image)) : '/static/hospital/hospital.png'
+  const hospitalPhone = query.value.phone ? decodeURIComponent(String(query.value.phone)) : ''
+  
   try {
-    // 从URL参数构建医院基本信息
-    if (query.name) {
-      const hospitalName = decodeURIComponent(query.name || '')
-      const hospitalAddress = decodeURIComponent(query.address || '')
-      
-      // 使用高德地图API搜索医院的详细信息
+    
+    // 先构建基本的医院信息（不依赖网络请求）
+    let longitude = query.value.longitude || '116.397428'
+    let latitude = query.value.latitude || '39.90923'
+    
+    try {
+        // 使用高德地图API搜索医院的详细信息（作为增强功能）
       const searchParams = {
         key: AMAP_JS_KEY,
-        keywords: hospitalName,
+          keywords: hospitalName, // 使用实际传递的医院名称，不使用默认值
         city: '北京',
         offset: 1,
         extensions: 'all'
@@ -401,9 +532,6 @@ const fetchHospitalDetail = async () => {
         data: searchParams
       })
       
-      let longitude = '116.397428'
-      let latitude = '39.90923'
-      
       // @ts-ignore: response包含statusCode和data属性
       if (response && response.statusCode === 200 && response.data && response.data.status === '1' && response.data.pois && response.data.pois.length > 0) {
         // @ts-ignore: response.data.pois存在
@@ -413,28 +541,36 @@ const fetchHospitalDetail = async () => {
           longitude = lng
           latitude = lat
         }
+        }
+      } catch (apiError) {
+        console.warn('高德地图API请求失败，使用默认坐标:', apiError)
+        // API请求失败不影响基本医院信息的显示
       }
       
+      // 构建医院信息（即使网络请求失败也能显示）
       hospital.value = {
-        id: Date.now(),
-        name: hospitalName,
-        level: decodeURIComponent(query.level || '未知'),
-        address: hospitalAddress,
-        distance: '0m',
+        id: hospitalId ? parseInt(hospitalId) : Date.now(),
+        name: hospitalName, // 使用实际传递的医院名称，不使用默认值
+        level: hospitalLevel,
+        address: hospitalAddress || '地址信息待补充',
+        distance: query.value.distance || '0m',
         isInternet: false,
         departments: [
           '内科', '口腔科', '普外科', '特需内分泌科', 
           '眼科', '特需心血管内科', '耳鼻喉科', '整形外科',
           '妇科', '特需妇科'
         ],
-        image: decodeURIComponent(query.image || '/static/hospital/hospital.png'),
+        image: hospitalImage,
         longitude: longitude,
         latitude: latitude,
-        phone: decodeURIComponent(query.phone || '010-58266699;010-58269911'),
+        phone: hospitalPhone,
         businessArea: '',
         rating: '',
         cost: ''
       }
+      
+      // 更新地图数据
+      updateMapData()
       
       // 模拟患者评价数据
       comments.value = [
@@ -499,10 +635,52 @@ const fetchHospitalDetail = async () => {
       // 计算平均评分
       const totalRating = comments.value.reduce((sum, comment) => sum + comment.rating, 0)
       averageRating.value = totalRating / totalComments.value
-    }
   } catch (err) {
-    error.value = '获取医院详情失败，请重试'
-    console.error('获取医院详情失败:', err)
+    // 即使发生错误，也要构建医院信息（使用从URL参数获取的信息）
+    console.error('获取医院详情失败，使用URL参数中的医院信息:', err)
+    
+    // 使用从URL参数获取的医院信息，而不是硬编码的默认值
+    hospital.value = {
+      id: hospitalId ? parseInt(hospitalId) : Date.now(),
+      name: hospitalName, // 使用实际传递的医院名称
+      level: hospitalLevel || '未知',
+      address: hospitalAddress || '地址信息待补充',
+      distance: query.value.distance || '0m',
+      isInternet: false,
+      departments: [
+        '内科', '口腔科', '普外科', '特需内分泌科', 
+        '眼科', '特需心血管内科', '耳鼻喉科', '整形外科',
+        '妇科', '特需妇科'
+      ],
+      image: hospitalImage,
+      longitude: '116.397428',
+      latitude: '39.90923',
+      phone: '010-58266699;010-58269911',
+      businessArea: '',
+      rating: '',
+      cost: ''
+    }
+    
+    // 更新地图数据
+    updateMapData()
+    
+    // 模拟患者评价数据
+    comments.value = [
+      {
+        id: 1,
+        userName: '张先生',
+        userAvatar: '/static/avatar/default-avatar.png',
+        rating: 5,
+        content: '医生很专业，态度也很好，解答了我很多疑问，治疗效果也不错，值得推荐！',
+        date: '2025-12-20',
+        department: '内科',
+        doctorName: '李医生',
+        helpfulCount: 15
+      }
+    ]
+    
+    totalComments.value = comments.value.length
+    averageRating.value = 5
   } finally {
     loading.value = false
   }
@@ -620,153 +798,99 @@ const viewMoreComments = () => {
   });
 }
 
-// 初始化高德地图
+// 地图初始化函数
 const initMap = () => {
   console.log('开始初始化地图...')
   
-  // 检查是否在浏览器环境中
-  if (typeof window === 'undefined') {
-    console.log('不在浏览器环境中，跳过地图初始化')
+  // #ifdef H5
+  // 只在H5平台初始化高德地图
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    console.log('在H5平台初始化高德地图')
+  
+  // 检查高德地图API是否加载成功
+    if (typeof (window as any).AMAP === 'undefined') {
+    console.log('高德地图API未加载，等待加载...')
+      // 如果 API 还未加载，动态加载
+      const script = document.createElement('script')
+      script.type = 'text/javascript'
+      script.src = `https://webapi.amap.com/maps?v=2.0&key=${AMAP_JS_KEY}`
+      script.onload = () => {
+        console.log('高德地图API加载成功')
+        initAmapMap()
+      }
+      script.onerror = () => {
+        console.error('高德地图API加载失败')
+      }
+      document.head.appendChild(script)
+  } else {
+    console.log('高德地图API已加载成功')
+      initAmapMap()
+  }
+}
+  // #endif
+  
+  console.log('地图初始化完成')
+}
+
+// 初始化高德地图
+const initAmapMap = () => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  
+    const containerElement = document.getElementById('hospitalMap')
+  if (!containerElement) {
+    console.log('未找到地图容器元素')
+    return
+  }
+      
+  if (!hospital.value) {
+    console.log('医院信息为空')
     return
   }
   
-  // 检查高德地图API是否加载成功
-  // @ts-ignore: AMap是高德地图全局对象
-  if (typeof (window as any).AMap === 'undefined') {
-    console.log('高德地图API未加载，等待加载...')
-    // 如果 API 还未加载，等待一段时间后重试
-    let retryCount = 0
-    const maxRetries = 10
-    const checkInterval = setInterval(() => {
-      retryCount++
-      if (typeof (window as any).AMap !== 'undefined') {
-        clearInterval(checkInterval)
-        console.log('高德地图API加载成功')
-        initMapAfterLoad()
-      } else if (retryCount >= maxRetries) {
-        clearInterval(checkInterval)
-        console.error('高德地图API加载超时')
-        uni.showToast({
-          title: '地图加载失败，请刷新页面重试',
-          icon: 'none',
-          duration: 3000
-        })
-      }
-    }, 200)
-  } else {
-    console.log('高德地图API已加载成功')
-    initMapAfterLoad()
-  }
-}
-
-// 地图API加载成功后初始化地图
-const initMapAfterLoad = () => {
-  // 使用setTimeout确保DOM已经完全渲染
-  setTimeout(() => {
-    console.log('查找地图容器元素...')
-    const containerElement = document.getElementById('hospitalMap')
-    console.log('地图容器元素:', containerElement)
-    
-    if (containerElement) {
-      // 确保地图容器有明确的尺寸
-      const rect = containerElement.getBoundingClientRect()
-      console.log('地图容器尺寸:', rect.width, 'x', rect.height)
-      
-      if (hospital.value) {
-        console.log('医院信息:', hospital.value)
-        
-        // 定义地图中心点和缩放级别
-        const center = [
-          parseFloat(hospital.value.longitude) || 116.397428,
-          parseFloat(hospital.value.latitude) || 39.90923
-        ]
-        const zoom = 16
-        
-        console.log('地图中心点:', center)
-        console.log('地图缩放级别:', zoom)
-        
-        try {
-          // 创建一个标准的div元素作为地图容器
-          const mapDiv = document.createElement('div')
-          mapDiv.style.width = '100%'
-          mapDiv.style.height = '100%'
-          mapDiv.style.position = 'absolute'
-          mapDiv.style.top = '0'
-          mapDiv.style.left = '0'
-          
-          // 将新创建的div元素添加到原容器中
-          containerElement.innerHTML = ''
-          containerElement.appendChild(mapDiv)
-          
-          console.log('创建了标准div作为地图容器:', mapDiv)
+  try {
+    const lat = parseFloat(hospital.value.latitude) || 39.90923
+    const lng = parseFloat(hospital.value.longitude) || 116.397428
           
           // 创建地图实例
-          // @ts-ignore: AMap.Map是高德地图地图类
-          const map = new (window as any).AMap.Map(mapDiv, {
-            center: center,
-            zoom: zoom,
+    const map = new (window as any).AMap.Map(containerElement, {
+      center: [lng, lat],
+      zoom: 16,
             resizeEnable: true,
-            viewMode: '2D',
-            lang: 'zh_cn'
+      viewMode: '2D'
           })
           
           console.log('地图实例创建成功:', map)
           
-          // 监听地图加载完成事件
-          map.on('complete', () => {
-            console.log('地图加载完成')
-          })
-          
-          // 监听地图加载失败事件
-          map.on('error', (err: any) => {
-            console.error('地图加载失败:', err)
-            // 如果是 key 相关错误，给出提示
-            if (err && (err.message && err.message.includes('key') || err.message && err.message.includes('USERKEY'))) {
-              uni.showToast({
-                title: '地图 key 配置错误，请检查控制台配置',
-                icon: 'none',
-                duration: 3000
-              })
-            }
-          })
-          
           // 添加标记
-          // @ts-ignore: AMap.Marker是高德地图标记类
           const marker = new (window as any).AMap.Marker({
-            position: center,
+      position: [lng, lat],
             title: hospital.value.name,
             map: map
           })
           
-          console.log('地图标记创建成功:', marker)
-          
-          // 添加信息窗口
-          // @ts-ignore: AMap.InfoWindow和AMap.Pixel是高德地图类
+    // 添加信息窗体
           const infoWindow = new (window as any).AMap.InfoWindow({
-            content: `<h3>${hospital.value.name}</h3><p>${hospital.value.address}</p>`,
+      content: `<div style="padding: 10px;">
+        <div style="font-weight: bold; margin-bottom: 5px;">${hospital.value.name}</div>
+        <div style="color: #666; font-size: 12px;">${hospital.value.address}</div>
+      </div>`,
             offset: new (window as any).AMap.Pixel(0, -30)
           })
           
-          console.log('信息窗口创建成功:', infoWindow)
-          
-          // 点击标记显示信息窗口
           marker.on('click', () => {
             infoWindow.open(map, marker.getPosition())
           })
           
-          // 自动适配地图显示范围
-          map.setFitView([marker])
+    // 自动打开信息窗体
+    infoWindow.open(map, marker.getPosition())
+    
+    mapLoaded.value = true
+    console.log('地图标记创建成功:', marker)
           
         } catch (error) {
           console.log('地图初始化异常:', error)
-        }
-      } else {
-        console.log('医院信息为空')
-      }
-    } else {
-      console.log('未找到地图容器元素')
-    }
-  }, 500) // 增加延迟时间，确保DOM已经完全渲染
+    mapLoaded.value = false
+  }
 }
 
 // 跳转到预约挂号页面
@@ -793,7 +917,35 @@ const navigateToSmartConsult = () => {
 }
 
 // 导航到医院
+// 使用防抖变量，避免重复触发
+let lastNavigateClickTime = 0
+
+const handleNavigateTap = () => {
+  try {
+    console.log('[hospital-detail] 点击去导航按钮')
+
+    // 防抖：避免短时间内重复触发（cover-view 在部分机型/运行时可能重复派发事件）
+    const now = Date.now()
+    if (lastNavigateClickTime > 0 && (now - lastNavigateClickTime) < 1000) {
+      console.log('[hospital-detail] 导航触发过于频繁，已忽略本次点击（防抖）')
+      return
+    }
+    lastNavigateClickTime = now
+    
+    // 直接显示地图选择菜单
+    navigateToHospital()
+  } catch (err) {
+    // @ts-ignore
+    console.error('点击导航按钮异常:', err)
+    uni.showToast({
+      title: '打开导航失败，请重试',
+      icon: 'error'
+    })
+  }
+}
+
 const navigateToHospital = () => {
+  try {
   if (!hospital.value) {
     uni.showToast({
       title: '医院信息加载中，请稍候',
@@ -807,32 +959,264 @@ const navigateToHospital = () => {
   const hospitalLongitude = parseFloat(hospital.value.longitude) || 116.397428
   const hospitalName = hospital.value.name || '医院'
   
-  // 使用我们封装好的导航函数，支持地图选择
+    // 验证坐标是否有效
+    if (isNaN(hospitalLatitude) || isNaN(hospitalLongitude)) {
+      uni.showToast({
+        title: '医院位置信息无效',
+        icon: 'error'
+      })
+      return
+    }
+    
+    // 设置导航状态，用于从外部地图返回时识别
+    const navigateTime = Date.now()
+    isNavigating.value = true
+    navigateStartTime.value = navigateTime
+    try {
+      uni.setStorageSync('hospital_detail_navigating', 'true')
+      uni.setStorageSync('hospital_detail_navigate_time', String(navigateTime))
+      console.log('[hospital-detail] 导航状态已保存，时间戳:', navigateTime)
+    } catch (e) {
+      // @ts-ignore
+      console.warn('保存导航状态失败:', e)
+    }
+    
+    // 使用 openMapNavigation 显示地图选择菜单
+    // mapType: 'auto' 会显示选择菜单，让用户选择高德地图、百度地图、腾讯地图
   const destination = {
     latitude: hospitalLatitude,
     longitude: hospitalLongitude,
     address: hospital.value.address || ''
   }
   
-  // 调用导航函数，会自动显示地图选择菜单
-  openMapNavigationWithFallback(destination, {
-    destinationName: hospitalName
-  })
+    // 显示地图选择菜单（高德地图、百度地图、腾讯地图）
+    // showWebOption: false 表示不显示网页版选项，只显示 App 选项
+    openMapNavigation(destination, {
+      destinationName: hospitalName,
+      mode: 'drive',
+      mapType: 'auto', // 'auto' 会显示选择菜单
+      showWebOption: false // 不显示网页版选项，只显示 App 选项
+    })
+  } catch (err) {
+    // @ts-ignore
+    console.error('导航到医院异常:', err)
+    // 导航失败，重置标志
+    isNavigating.value = false
+    navigateStartTime.value = 0
+    try {
+      uni.removeStorageSync('hospital_detail_navigating')
+      uni.removeStorageSync('hospital_detail_navigate_time')
+    } catch (e) {
+      // @ts-ignore
+      console.warn('清除导航状态失败:', e)
+    }
+    uni.showToast({
+      title: '打开导航失败，请重试',
+      icon: 'error'
+    })
+  }
 }
 
-// 监听activeTab变化，当切换到交通指南时初始化地图
+// 监听activeTab变化，当切换到交通指南时的处理
 watch(activeTab, (newTab) => {
   if (newTab === 'transport') {
-    // 延迟一下，确保DOM已经渲染完成
+    console.log('切换到交通指南标签')
+    // #ifdef H5
+    // H5端延迟初始化地图，确保DOM已渲染
     setTimeout(() => {
       initMap()
-    }, 100)
+    }, 300)
+    // #endif
   }
 })
 
-// 页面加载时获取医院详情
-onMounted(() => {
+// 监听医院数据变化，更新地图
+watch(
+  hospital,
+  () => {
+    updateMapData()
+    // #ifdef H5
+    if (activeTab.value === 'transport') {
+      setTimeout(() => {
+        initMap()
+      }, 300)
+  }
+    // #endif
+  },
+  // @ts-ignore: watch 支持第三个参数 options
+  { deep: true }
+)
+
+// 页面加载时获取参数并加载医院详情（uni-app 标准方式）
+onLoad((options: any) => {
+  console.log('onLoad 获取到的页面参数:', options)
+  
+  // 将参数保存到 query 中
+  if (options && Object.keys(options).length > 0) {
+    query.value = options
+    console.log('参数已保存到 query:', query.value)
+  } else {
+    // 如果没有通过 onLoad 获取到参数，尝试其他方式
+    getPageParams()
+  }
+  
+  // 获取医院详情
   fetchHospitalDetail()
+})
+
+// 页面挂载时的初始化（保留用于其他初始化操作）
+onMounted(() => {
+  
+  // #ifdef APP-PLUS
+  // 在页面加载时设置页面样式，确保应用在后台时不会崩溃
+  // 注意：应用生命周期监听应该使用 onShow/onHide，而不是 plus.runtime.addEventListener
+  try {
+    // @ts-ignore
+    if (typeof plus !== 'undefined' && plus.webview) {
+      // @ts-ignore
+      const currentWebview = plus.webview.currentWebview();
+      // @ts-ignore
+      if (currentWebview) {
+        // @ts-ignore
+        currentWebview.setStyle({
+          keepAlive: true,
+          hardwareAccelerated: true
+        });
+      }
+    }
+  } catch (err) {
+    // @ts-ignore
+    console.warn('设置页面样式失败:', err);
+  }
+  // #endif
+})
+
+// 页面显示时（从后台恢复）
+onShow(() => {
+  // 当用户从外部应用（如高德地图）返回时，确保页面状态正确
+  console.log('[hospital-detail] 页面显示，从后台恢复')
+  
+  // 从本地存储读取导航状态（更可靠，不会因为页面切换而丢失）
+  let isJustReturnedFromNavigation = false
+  try {
+    const navigatingFlag = uni.getStorageSync('hospital_detail_navigating')
+    const navigateTimeStr = uni.getStorageSync('hospital_detail_navigate_time')
+    if (navigatingFlag === 'true' && navigateTimeStr) {
+      const navigateTime = parseInt(navigateTimeStr, 10)
+      const now = Date.now()
+      // 如果导航开始时间在最近 30 秒内，说明是从导航返回
+      if (navigateTime > 0 && (now - navigateTime) < 30000) {
+        isJustReturnedFromNavigation = true
+        console.log('[hospital-detail] 检测到从高德地图返回（时间差:', now - navigateTime, 'ms）')
+      } else {
+        // 时间超过 30 秒，清除过期的导航状态
+        uni.removeStorageSync('hospital_detail_navigating')
+        uni.removeStorageSync('hospital_detail_navigate_time')
+      }
+    }
+  } catch (e) {
+    // @ts-ignore
+    console.warn('读取导航状态失败:', e)
+  }
+  
+  // 无论是否从导航返回，都清除导航状态
+  try {
+    uni.removeStorageSync('hospital_detail_navigating')
+    uni.removeStorageSync('hospital_detail_navigate_time')
+  } catch (e) {
+    // @ts-ignore
+    console.warn('清除导航状态失败:', e)
+  }
+  
+  // 重置导航状态变量
+  isNavigating.value = false
+  navigateStartTime.value = 0
+  
+  // 确保页面状态正确
+  // #ifdef APP-PLUS
+  try {
+    // @ts-ignore
+    if (typeof plus !== 'undefined' && plus.webview) {
+      // @ts-ignore
+      const currentWebview = plus.webview.currentWebview();
+      // @ts-ignore
+      if (currentWebview) {
+        // @ts-ignore
+        currentWebview.setStyle({
+          keepAlive: true,
+          hardwareAccelerated: true
+        });
+        // 确保页面可见
+        // @ts-ignore
+        currentWebview.show();
+      }
+    }
+  } catch (err) {
+    // @ts-ignore
+    console.warn('恢复页面状态失败:', err);
+  }
+  // #endif
+  
+  // 只确保 loading 为 false，不执行任何其他操作
+  if (loading.value) {
+    loading.value = false
+  }
+  if (error.value) {
+    error.value = ''
+  }
+  
+  // 如果数据存在，确保页面显示正常
+  if (hospital.value) {
+    console.log('[hospital-detail] 数据存在，恢复页面显示')
+  } else {
+    // 如果数据不存在，立即重新加载
+    console.log('[hospital-detail] 医院数据丢失，重新加载')
+    loading.value = true
+    error.value = ''
+    fetchHospitalDetail()
+  }
+})
+
+// 页面隐藏时（切换到后台）
+onHide(() => {
+  // 当打开外部应用（如高德地图）时，应用会被挂起到后台
+  console.log('[hospital-detail] 页面隐藏，应用挂起到后台')
+  
+  // 如果导航标志已设置，说明是因为导航导致的应用挂起
+  // 在 onHide 中再次确认并保存导航状态，确保从导航返回时能正确识别
+  if (isNavigating.value && navigateStartTime.value > 0) {
+    console.log('[hospital-detail] 检测到导航导致的应用挂起，保存导航状态')
+    try {
+      uni.setStorageSync('hospital_detail_navigating', 'true')
+      uni.setStorageSync('hospital_detail_navigate_time', String(navigateStartTime.value))
+    } catch (e) {
+      // @ts-ignore
+      console.warn('保存导航状态失败:', e)
+    }
+  }
+  
+  // 这是正常的系统行为，应用状态会被自动保存
+  // 确保应用状态正确保存，避免被系统回收
+  // #ifdef APP-PLUS
+  try {
+    // @ts-ignore
+    if (typeof plus !== 'undefined' && plus.webview) {
+      // @ts-ignore
+      const currentWebview = plus.webview.currentWebview();
+      // @ts-ignore
+      if (currentWebview) {
+        // @ts-ignore
+        currentWebview.setStyle({
+          keepAlive: true,
+          hardwareAccelerated: true
+        });
+      }
+    }
+  } catch (err) {
+    // @ts-ignore
+    console.warn('保存应用状态失败:', err);
+  }
+  // #endif
 })
 </script>
 
@@ -1263,6 +1647,33 @@ onMounted(() => {
     height: 100%;
     position: relative;
     z-index: 1;
+    
+    // 地图占位符样式
+    .map-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background-color: #f0f0f0;
+      color: #666;
+      gap: 16rpx;
+      padding: 40rpx;
+      text-align: center;
+      
+      .map-placeholder-text {
+        font-size: 28rpx;
+        font-weight: 600;
+        color: #333;
+      }
+      
+      .map-placeholder-subtext {
+        font-size: 24rpx;
+        color: #666;
+        line-height: 1.4;
+      }
+    }
   }
   
   // 导航按钮
@@ -1270,9 +1681,8 @@ onMounted(() => {
     position: absolute;
     bottom: 20rpx;
     right: 20rpx;
-    background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
-    color: #fff;
-    padding: 16rpx 32rpx;
+    background: rgba(74, 144, 226, 0.95);
+    padding: 18rpx 34rpx;
     border-radius: 50rpx;
     display: flex;
     align-items: center;
@@ -1281,6 +1691,9 @@ onMounted(() => {
     z-index: 10;
     cursor: pointer;
     transition: all 0.3s;
+    min-width: 160rpx;
+    height: 72rpx;
+    justify-content: center;
     
     &:active {
       transform: scale(0.95);
@@ -1291,7 +1704,15 @@ onMounted(() => {
       font-size: 28rpx;
       font-weight: 600;
       color: #fff;
+      line-height: 72rpx;
     }
+  }
+
+  // cover-view 在部分端上对 flex 支持不完整，给内部再包一层更稳
+  .navigate-button-inner {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
   }
   
   .transport-info {

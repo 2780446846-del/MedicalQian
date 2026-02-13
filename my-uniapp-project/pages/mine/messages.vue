@@ -92,13 +92,51 @@ export default {
     }
   },
   onLoad() {
-    // 加载消息列表
     this.loadMessages();
   },
   methods: {
-    loadMessages() {
-      // 从本地存储或服务器加载消息
-      // 这里使用模拟数据
+    async loadMessages() {
+      // 从后端获取预约数据生成通知消息
+      try {
+        const { get } = require('@/utils/api.js');
+        const res = await get('/appointment');
+        if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+          const msgs = res.data.map((a, i) => {
+            const status = a.status || 'pendingPayment';
+            const titleMap = {
+              pendingPayment: '待支付提醒',
+              pendingVisit: '预约成功通知',
+              pendingRate: '就诊完成，请评价',
+              rated: '评价成功',
+              cancelled: '预约取消通知',
+              history: '历史预约'
+            };
+            const contentMap = {
+              pendingPayment: `您预约的${a.doctorName || ''}医生（${a.date} ${a.time}）尚未支付，请尽快完成支付。`,
+              pendingVisit: `您已成功预约${a.doctorName || ''}医生，就诊时间：${a.date} ${a.time}，请按时前往${a.hospital || '医院'}就诊。`,
+              pendingRate: `您于${a.date}在${a.hospital || ''}就诊已完成，请对${a.doctorName || ''}医生进行评价。`,
+              rated: `感谢您对${a.doctorName || ''}医生的评价。`,
+              cancelled: `您预约的${a.doctorName || ''}医生（${a.date} ${a.time}）已取消。`,
+              history: `您于${a.date}在${a.hospital || ''}的就诊记录已归档。`
+            };
+            return {
+              id: a._id || i + 1,
+              title: titleMap[status] || '系统通知',
+              date: (a.createdAt || '').substring(0, 10) || a.date || '',
+              content: contentMap[status] || `预约${a.doctorName || ''}医生`,
+              type: status.includes('cancel') ? 'appointment_cancel' : 'appointment_success',
+              read: status !== 'pendingPayment'
+            };
+          });
+          if (msgs.length > 0) {
+            this.messageList = msgs;
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('从后端加载消息失败:', e);
+      }
+      // 保留默认消息作为fallback（已在data中）
     },
     viewMessage(message) {
       // 标记为已读

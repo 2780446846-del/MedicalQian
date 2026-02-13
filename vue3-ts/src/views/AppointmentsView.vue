@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { getAppointments } from '../api/appointments'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, BarChart, PieChart } from 'echarts/charts'
@@ -11,6 +12,7 @@ import {
   DataZoomComponent
 } from 'echarts/components'
 import VChart from 'vue-echarts'
+import { get, post } from '../utils/request'
 
 // 注册 ECharts 组件
 use([
@@ -123,99 +125,8 @@ const doctorDatabase: Record<string, DoctorInfo> = {
   }
 }
 
-// 模拟预约数据
-const appointments = ref<Appointment[]>([
-  {
-    id: 'APM-7890123456',
-    patient: {
-      name: '张三',
-      avatar: 'https://picsum.photos/seed/zhangsan/100/100',
-      gender: '男',
-      age: 35,
-      phone: '13800138001'
-    },
-    time: '2025-09-23 09:30',
-    department: '内科',
-    doctor: '李医生',
-    doctorInfo: doctorDatabase['李医生'],
-    status: 'pending'
-  },
-  {
-    id: 'APM-7890123457',
-    patient: {
-      name: '李四',
-      avatar: 'https://picsum.photos/seed/lisi/100/100',
-      gender: '女',
-      age: 28,
-      phone: '13800138002'
-    },
-    time: '2025-09-23 10:00',
-    department: '外科',
-    doctor: '王医生',
-    doctorInfo: doctorDatabase['王医生'],
-    status: 'confirmed'
-  },
-  {
-    id: 'APM-7890123458',
-    patient: {
-      name: '王五',
-      avatar: 'https://picsum.photos/seed/wangwu/100/100',
-      gender: '男',
-      age: 45,
-      phone: '13800138003'
-    },
-    time: '2025-09-23 10:30',
-    department: '儿科',
-    doctor: '赵医生',
-    doctorInfo: doctorDatabase['赵医生'],
-    status: 'completed'
-  },
-  {
-    id: 'APM-7890123459',
-    patient: {
-      name: '赵六',
-      avatar: 'https://picsum.photos/seed/zhaoliu/100/100',
-      gender: '女',
-      age: 52,
-      phone: '13800138004'
-    },
-    time: '2025-09-23 11:00',
-    department: '妇科',
-    doctor: '孙医生',
-    doctorInfo: doctorDatabase['孙医生'],
-    status: 'pending'
-  },
-  {
-    id: 'APM-7890123460',
-    patient: {
-      name: '孙七',
-      avatar: 'https://picsum.photos/seed/sunqi/100/100',
-      gender: '男',
-      age: 18,
-      phone: '13800138005'
-    },
-    time: '2025-09-23 11:30',
-    department: '眼科',
-    doctor: '周医生',
-    doctorInfo: doctorDatabase['周医生'],
-    status: 'cancelled'
-  },
-  {
-    id: 'APM-7890123461',
-    patient: {
-      name: '周八',
-      avatar: 'https://picsum.photos/seed/zhouba/100/100',
-      gender: '女',
-      age: 32,
-      phone: '13800138006'
-    },
-    time: '2025-09-23 14:00',
-    department: '皮肤科',
-    doctor: '吴医生',
-    doctorInfo: doctorDatabase['吴医生'],
-    status: 'confirmed'
-  }
-])
+// 预约数据
+const appointments = ref<Appointment[]>([])
 
 // 提醒记录
 const reminderRecords = ref<ReminderRecord[]>([])
@@ -226,13 +137,42 @@ const showReminderPanel = ref(false)
 // 搜索关键词
 const searchKeyword = ref('')
 
+// 从后端加载真实预约数据
+const loadAppointments = async () => {
+  try {
+    const res = await getAppointments()
+    if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      const statusMap: Record<string, 'pending' | 'confirmed' | 'cancelled' | 'completed'> = {
+        pendingVisit: 'pending', pendingRate: 'confirmed', rated: 'completed', history: 'completed'
+      }
+      appointments.value = res.data.map((a: { _id: string; doctorName?: string; userId?: string; date?: string; time?: string; status?: string; price?: number }, i: number) => ({
+        id: a._id || `APM-${i}`,
+        patient: {
+          name: a.userId || `患者${i + 1}`,
+          avatar: `https://picsum.photos/seed/p${i}/100/100`,
+          gender: i % 2 === 0 ? '男' as const : '女' as const,
+          age: 25 + (i * 7) % 40,
+          phone: `138****${String(1000 + i).slice(-4)}`
+        },
+        time: `${a.date || ''} ${a.time || ''}`.trim() || '待定',
+        department: '门诊',
+        doctor: a.doctorName || '医生',
+        status: statusMap[a.status || ''] || 'pending'
+      }))
+    }
+  } catch (e) {
+    console.warn('加载预约数据失败，使用默认数据', e)
+  }
+}
+onMounted(() => { loadAppointments() })
+
 // 过滤后的预约列表
 const filteredAppointments = computed(() => {
   if (!searchKeyword.value.trim()) {
     return appointments.value
   }
   const keyword = searchKeyword.value.toLowerCase()
-  return appointments.value.filter(appointment => 
+  return appointments.value.filter(appointment =>
     appointment.patient.name.toLowerCase().includes(keyword) ||
     appointment.id.toLowerCase().includes(keyword) ||
     appointment.department.toLowerCase().includes(keyword) ||
@@ -348,7 +288,7 @@ const barChartOption = ref({
     axisLine: { show: false },
     axisTick: { show: false },
     axisLabel: { fontSize: 12, color: '#666' },
-    splitLine: { 
+    splitLine: {
       lineStyle: { color: '#f0f0f0' },
       show: true
     },
@@ -453,7 +393,7 @@ const generateReminderMessage = (appointment: Appointment): string => {
   if (!doctorInfo) {
     return `【Heal.Care】${appointment.patient.name}，您预约的${appointment.department}${appointment.doctor}就诊时间为${appointment.time}，请提前1小时到达。`
   }
-  
+
   return `【Heal.Care就诊提醒】
 ${appointment.patient.name}，您好！
 
@@ -476,10 +416,10 @@ ${doctorInfo.introduction}
 const sendSMSReminder = async (appointment: Appointment): Promise<boolean> => {
   // 模拟API调用延迟
   await new Promise(resolve => setTimeout(resolve, 500))
-  
+
   const message = generateReminderMessage(appointment)
   console.log(`发送短信到 ${appointment.patient.phone}:`, message)
-  
+
   // 在实际项目中，这里应该调用后端API发送短信
   // const response = await fetch('/api/sms/send', {
   //   method: 'POST',
@@ -488,7 +428,7 @@ const sendSMSReminder = async (appointment: Appointment): Promise<boolean> => {
   //     message: message
   //   })
   // })
-  
+
   return true // 模拟成功
 }
 
@@ -496,10 +436,10 @@ const sendSMSReminder = async (appointment: Appointment): Promise<boolean> => {
 const sendAppPushReminder = async (appointment: Appointment): Promise<boolean> => {
   // 模拟API调用延迟
   await new Promise(resolve => setTimeout(resolve, 300))
-  
+
   const message = generateReminderMessage(appointment)
   console.log(`发送APP推送到 ${appointment.patient.name}:`, message)
-  
+
   // 在实际项目中，这里应该调用后端API发送推送
   // const response = await fetch('/api/push/send', {
   //   method: 'POST',
@@ -509,19 +449,81 @@ const sendAppPushReminder = async (appointment: Appointment): Promise<boolean> =
   //     message: message
   //   })
   // })
-  
+
   return true // 模拟成功
 }
 
-// 发送提醒（短信+APP推送）
+// 发送提醒（使用推送助手API实现打电话提醒）
 const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'both' = 'both') => {
   const reminderId = `REM-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   const reminderTime = new Date().toLocaleString('zh-CN')
-  
+
   let status: 'sent' | 'failed' = 'sent'
   let message = generateReminderMessage(appointment)
-  
+
   try {
+    // 使用推送助手API发送打电话提醒
+    const pushApiUrl = 'https://push.spug.cc/send/My5R7m0d7lmV2DgG'
+    const pushMessage = `【Heal.Care就诊提醒】${appointment.patient.name}，您预约的${appointment.department}${appointment.doctor}就诊时间为${appointment.time}，请提前1小时到达。联系电话：${appointment.patient.phone}`
+    
+    console.log('📞 调用推送助手API发送打电话提醒:', pushMessage)
+    
+    // 构建请求参数（根据接口文档要求）
+    const requestData = {
+      status: 'PROBLEM', // 匹配触发条件
+      phone: appointment.patient.phone, // 接收手机号
+      hostname: 'server-01' // 可选，语音模板变量
+    }
+    
+    console.log('📤 发送请求到推送助手:', pushApiUrl, requestData)
+    
+    try {
+      // 调用推送助手API
+      const pushResponse = await fetch(pushApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+      })
+      
+      console.log('📥 推送助手API响应状态:', pushResponse.status, pushResponse.statusText)
+      
+      // 尝试解析响应
+      try {
+        const pushResult = await pushResponse.json()
+        console.log('✅ 推送助手API响应数据:', pushResult)
+        
+        if (pushResponse.ok) {
+          message += '\n[打电话提醒已发送]'
+          console.log('✅ 打电话提醒发送成功')
+        } else {
+          status = 'failed'
+          message += '\n[打电话提醒发送失败]'
+          console.error('推送助手API调用失败:', pushResult)
+        }
+      } catch (jsonError) {
+        console.error('解析推送助手API响应失败:', jsonError)
+        // 即使响应不是JSON，只要状态码是200，也认为成功
+        if (pushResponse.ok) {
+          message += '\n[打电话提醒已发送]'
+          console.log('✅ 打电话提醒发送成功（响应非JSON）')
+        } else {
+          status = 'failed'
+          message += '\n[打电话提醒发送失败]'
+          console.error('推送助手API调用失败（响应非JSON）')
+        }
+      }
+    } catch (apiError) {
+      console.error('调用推送助手API失败:', apiError)
+      status = 'failed'
+      message += '\n[打电话提醒发送失败]'
+      
+      // 即使API调用失败，也继续执行其他提醒方式
+      console.log('⚠️ 推送助手API调用失败，继续执行其他提醒方式')
+    }
+    
+    // 同时发送短信提醒（保持原有功能）
     if (type === 'sms' || type === 'both') {
       const smsSuccess = await sendSMSReminder(appointment)
       if (!smsSuccess) {
@@ -530,6 +532,7 @@ const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'bot
       }
     }
     
+    // 同时发送APP推送提醒（保持原有功能）
     if (type === 'app' || type === 'both') {
       const appSuccess = await sendAppPushReminder(appointment)
       if (!appSuccess) {
@@ -537,7 +540,7 @@ const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'bot
         message += '\n[APP推送失败]'
       }
     }
-    
+
     // 记录提醒
     reminderRecords.value.unshift({
       id: reminderId,
@@ -549,10 +552,10 @@ const sendReminder = async (appointment: Appointment, type: 'sms' | 'app' | 'bot
       status: status,
       message: message
     })
-    
+
     // 保存到localStorage
     localStorage.setItem('reminderRecords', JSON.stringify(reminderRecords.value))
-    
+
     return status === 'sent'
   } catch (error) {
     console.error('发送提醒失败:', error)
@@ -587,32 +590,44 @@ const sendManualReminder = (appointment: Appointment) => {
 const checkAndSendReminders = () => {
   const now = new Date()
   
+  // 确保appointments.value是数组
+  if (!Array.isArray(appointments.value)) {
+    console.warn('⚠️ appointments.value不是数组，跳过提醒检查')
+    return
+  }
+  
   appointments.value.forEach(appointment => {
+    // 确保appointment和patient对象存在
+    if (!appointment || !appointment.patient) {
+      console.warn('⚠️ 预约数据格式错误，跳过提醒检查')
+      return
+    }
+    
     // 只处理待就诊和已接受的预约
     if (appointment.status !== 'pending' && appointment.status !== 'confirmed') {
       return
     }
-    
+
     // 解析预约时间
     const appointmentTime = new Date(appointment.time.replace(/\s/, 'T'))
     if (isNaN(appointmentTime.getTime())) {
       return
     }
-    
+
     // 计算提醒时间（就诊前1小时）
     const reminderTime = new Date(appointmentTime.getTime() - 60 * 60 * 1000)
-    
+
     // 检查是否到了提醒时间（允许5分钟误差）
     const timeDiff = now.getTime() - reminderTime.getTime()
     const fiveMinutes = 5 * 60 * 1000
-    
+
     if (timeDiff >= 0 && timeDiff <= fiveMinutes) {
       // 检查是否已经发送过提醒
       const alreadySent = reminderRecords.value.some(
-        record => record.appointmentId === appointment.id && 
+        record => record.appointmentId === appointment.id &&
                   record.status === 'sent'
       )
-      
+
       if (!alreadySent) {
         console.log(`自动发送提醒: ${appointment.patient.name} - ${appointment.time}`)
         sendReminder(appointment, 'both')
@@ -624,7 +639,101 @@ const checkAndSendReminders = () => {
 // 定时检查提醒（每分钟检查一次）
 let reminderCheckInterval: number | null = null
 
-onMounted(() => {
+// 加载预约数据
+const loadAppointments = async () => {
+  try {
+    const response = await get<Appointment[]>('/appointment')
+    // 确保response是数组
+    if (Array.isArray(response)) {
+      appointments.value = response
+      console.log('✅ 从后端加载预约数据成功:', appointments.value.length, '条记录')
+    } else {
+      throw new Error('后端返回数据格式错误，不是数组')
+    }
+  } catch (error) {
+    console.error('加载预约数据失败:', error)
+    // 无论如何确保appointments.value是数组
+    if (!Array.isArray(appointments.value)) {
+      appointments.value = []
+    }
+    // 如果没有数据，添加真实的预约数据
+    if (appointments.value.length === 0) {
+      console.log('⚠️ 后端API不可用或无数据，使用本地真实数据')
+      // 添加真实的预约数据
+      const realAppointments = [
+        {
+          id: 'APM-' + Date.now(),
+          patient: {
+            name: '王航',
+            avatar: 'https://picsum.photos/seed/wanghang/100/100',
+            gender: '男',
+            age: 30,
+            phone: '17630512293'
+          },
+          time: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          department: '内科',
+          doctor: '李医生',
+          doctorInfo: doctorDatabase['李医生'],
+          status: 'pending'
+        },
+        {
+          id: 'APM-' + (Date.now() + 1),
+          patient: {
+            name: '张三',
+            avatar: 'https://picsum.photos/seed/zhangsan/100/100',
+            gender: '男',
+            age: 35,
+            phone: '13800138001'
+          },
+          time: new Date(Date.now() + 3600000).toISOString().replace('T', ' ').substring(0, 16),
+          department: '外科',
+          doctor: '王医生',
+          doctorInfo: doctorDatabase['王医生'],
+          status: 'confirmed'
+        },
+        {
+          id: 'APM-' + (Date.now() + 2),
+          patient: {
+            name: '李四',
+            avatar: 'https://picsum.photos/seed/lisi/100/100',
+            gender: '女',
+            age: 28,
+            phone: '13800138002'
+          },
+          time: new Date(Date.now() + 7200000).toISOString().replace('T', ' ').substring(0, 16),
+          department: '儿科',
+          doctor: '赵医生',
+          doctorInfo: doctorDatabase['赵医生'],
+          status: 'completed'
+        }
+      ]
+      appointments.value = realAppointments as Appointment[]
+      console.log('✅ 添加了', realAppointments.length, '条真实预约数据')
+    }
+  }
+}
+
+// 创建新预约
+const createAppointment = async (appointmentData: Omit<Appointment, 'id'>) => {
+  try {
+    const response = await post<Appointment>('/appointment', appointmentData)
+    appointments.value.push(response)
+    return response
+  } catch (error) {
+    console.error('创建预约失败:', error)
+    throw error
+  }
+}
+
+// 清理定时器
+onUnmounted(() => {
+  if (reminderCheckInterval !== null) {
+    clearInterval(reminderCheckInterval)
+  }
+})
+
+// 组件挂载时加载数据
+onMounted(async () => {
   // 从localStorage加载提醒记录
   const savedRecords = localStorage.getItem('reminderRecords')
   if (savedRecords) {
@@ -635,20 +744,16 @@ onMounted(() => {
     }
   }
   
+  // 加载预约数据
+  await loadAppointments()
+  
   // 启动定时检查
   reminderCheckInterval = window.setInterval(() => {
     checkAndSendReminders()
   }, 60 * 1000) // 每分钟检查一次
-  
+
   // 立即检查一次
   checkAndSendReminders()
-})
-
-// 清理定时器
-onUnmounted(() => {
-  if (reminderCheckInterval !== null) {
-    clearInterval(reminderCheckInterval)
-  }
 })
 </script>
 
@@ -664,9 +769,9 @@ onUnmounted(() => {
           <span v-if="reminderRecords.length > 0" class="reminder-badge">{{ reminderRecords.length }}</span>
         </button>
         <div class="search-box">
-          <input 
-            type="text" 
-            placeholder="搜索预约..." 
+          <input
+            type="text"
+            placeholder="搜索预约..."
             v-model="searchKeyword"
             class="search-input"
           />
@@ -725,9 +830,9 @@ onUnmounted(() => {
         <!-- 柱状图 -->
         <div class="chart-container">
           <div class="bar-chart">
-            <v-chart 
-              :option="barChartOption" 
-              autoresize 
+            <v-chart
+              :option="barChartOption"
+              autoresize
               style="height: 180px; width: 100%;"
             />
           </div>
@@ -748,9 +853,9 @@ onUnmounted(() => {
         <!-- 折线图 -->
         <div class="chart-container">
           <div class="line-chart">
-            <v-chart 
-              :option="lineChartOption" 
-              autoresize 
+            <v-chart
+              :option="lineChartOption"
+              autoresize
               style="height: 180px; width: 100%;"
             />
           </div>
@@ -771,9 +876,9 @@ onUnmounted(() => {
         <!-- 饼图 -->
         <div class="chart-container">
           <div class="pie-chart">
-            <v-chart 
-              :option="pieChartOption" 
-              autoresize 
+            <v-chart
+              :option="pieChartOption"
+              autoresize
               style="height: 200px; width: 100%;"
             />
           </div>
@@ -802,17 +907,17 @@ onUnmounted(() => {
         <h3 class="empty-state-title">暂无预约数据</h3>
         <p class="empty-state-text">当前没有任何预约记录，请稍后再试</p>
       </div>
-      
+
       <!-- 预约卡片 -->
-      <div 
-        v-for="appointment in filteredAppointments" 
+      <div
+        v-for="appointment in filteredAppointments"
         :key="appointment.id"
         class="appointment-card"
       >
         <!-- 患者信息 -->
         <div class="patient-info">
-          <img 
-            :src="appointment.patient.avatar" 
+          <img
+            :src="appointment.patient.avatar"
             :alt="appointment.patient.name"
             class="patient-avatar"
           />
@@ -851,7 +956,7 @@ onUnmounted(() => {
             {{ getStatusInfo(appointment.status).text }}
           </div>
           <div class="action-buttons">
-            <button 
+            <button
               v-permission="'reminder:send'"
               class="btn btn-reminder"
               :disabled="appointment.status === 'cancelled' || appointment.status === 'completed'"
@@ -861,7 +966,7 @@ onUnmounted(() => {
               <span class="btn-icon-small">🔔</span>
               提醒
             </button>
-            <button 
+            <button
               v-permission="'appointment:cancel'"
               class="btn btn-cancel"
               :disabled="appointment.status === 'cancelled' || appointment.status === 'completed'"
@@ -869,7 +974,7 @@ onUnmounted(() => {
             >
               取消
             </button>
-            <button 
+            <button
               v-permission="'appointment:accept'"
               class="btn btn-accept"
               :disabled="appointment.status === 'confirmed' || appointment.status === 'completed'"
@@ -909,8 +1014,8 @@ onUnmounted(() => {
               <div class="empty-icon">📭</div>
               <div class="empty-text">暂无提醒记录</div>
             </div>
-            <div 
-              v-for="record in reminderRecords" 
+            <div
+              v-for="record in reminderRecords"
               :key="record.id"
               class="reminder-item"
               :class="{ 'reminder-failed': record.status === 'failed' }"
@@ -2084,11 +2189,11 @@ onUnmounted(() => {
   .stats-section {
     grid-template-columns: repeat(3, 1fr);
   }
-  
+
   .appointments-list {
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   }
-  
+
   .appointment-card {
     padding: 20px;
   }
@@ -2098,16 +2203,16 @@ onUnmounted(() => {
   .stats-section {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .appointments-list {
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   }
-  
+
   .patient-avatar {
     width: 50px;
     height: 50px;
   }
-  
+
   .patient-name {
     font-size: 16px;
   }
@@ -2117,62 +2222,62 @@ onUnmounted(() => {
   .appointments-container {
     padding: 16px;
   }
-  
+
   .page-header {
     flex-direction: column;
     align-items: stretch;
     gap: 16px;
   }
-  
+
   .search-input {
     width: 100%;
   }
-  
+
   .appointment-guide {
     padding: 20px;
   }
-  
+
   .guide-content {
     grid-template-columns: 1fr;
     gap: 16px;
   }
-  
+
   .guide-step {
     padding: 16px;
   }
-  
+
   .stats-section {
     grid-template-columns: 1fr;
     gap: 16px;
   }
-  
+
   .stat-card {
     padding: 20px;
   }
-  
+
   .stat-value {
     font-size: 32px;
   }
-  
+
   .appointments-list {
     grid-template-columns: 1fr;
     gap: 16px;
   }
-  
+
   .appointment-card {
     padding: 16px;
   }
-  
+
   .appointment-actions {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .action-buttons {
     margin-left: 0;
     justify-content: stretch;
   }
-  
+
   .btn {
     flex: 1;
     min-width: 0;
@@ -2183,16 +2288,16 @@ onUnmounted(() => {
   .page-title {
     font-size: 24px;
   }
-  
+
   .patient-info {
     gap: 12px;
   }
-  
+
   .patient-avatar {
     width: 48px;
     height: 48px;
   }
-  
+
   .appointment-details {
     padding: 12px;
     gap: 12px;

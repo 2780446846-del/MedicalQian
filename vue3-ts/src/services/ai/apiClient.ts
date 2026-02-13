@@ -1,14 +1,16 @@
 export const API_CONFIG = {
-  BASE_URL: 'http://localhost:3001/api/deepseek/chat',
-  API_KEY: 'sk-0acca75db12c4c7db077ac2d78b2b69d',
+  BASE_URL: 'https://api.siliconflow.cn/v1/chat/completions',
+  API_KEY: 'sk-djrqqftqgncmnnqqttmkjyxxtwvpyijgmagalcugiuidhqax',
   TIMEOUT: 30000,
-  DEFAULT_MODEL: 'deepseek-chat',
+  DEFAULT_MODEL: 'Pro/zai-org/GLM-4.7',
   DEFAULT_TEMPERATURE: 0.3,
   DEFAULT_MAX_TOKENS: 500,
   DEFAULT_TOP_P: 0.8,
   WEATHER_API_URL: 'https://api.openweathermap.org/data/2.5/weather',
   WEATHER_API_KEY: 'YOUR_OPENWEATHERMAP_API_KEY',
-  DEFAULT_CITY: 'Beijing,CN'
+  DEFAULT_CITY: 'Beijing,CN',
+  VOICE_UPLOAD_URL: 'https://api.siliconflow.cn/v1/uploads/audio/voice',
+  DEFAULT_VOICE_MODEL: 'IndexTeam/IndexTTS-2'
 };
 
 export interface ChatMessage {
@@ -217,7 +219,7 @@ export class AIClient {
             cityName = '河北';
           }
         } else if (city) {
-          cityName = city.split(',')[0];
+          cityName = city.split(',')[0] || '北京';
         }
 
         const now = new Date();
@@ -353,7 +355,7 @@ export class AIClient {
           cityName = '河北';
         }
       } else if (city) {
-        cityName = city.split(',')[0];
+        cityName = city.split(',')[0] || '北京';
       }
 
       const isWinter = [12, 1, 2].includes(new Date().getMonth() + 1);
@@ -381,7 +383,11 @@ export class AIClient {
   }
 
   public formatWeatherText(weatherData: WeatherData): string {
-    return `当前${weatherData.name}的天气：${weatherData.weather[0].description}，温度${weatherData.main.temp}°C，体感温度${weatherData.main.feels_like}°C，湿度${weatherData.main.humidity}%，风速${weatherData.wind.speed}m/s`;
+    const weather = weatherData.weather[0];
+    if (!weather) {
+      return `当前${weatherData.name}的天气信息不可用`;
+    }
+    return `当前${weatherData.name}的天气：${weather.description}，温度${weatherData.main.temp}°C，体感温度${weatherData.main.feels_like}°C，湿度${weatherData.main.humidity}%，风速${weatherData.wind.speed}m/s`;
   }
 
   public async getForecast(city: string = this.currentCity): Promise<ForecastData> {
@@ -399,15 +405,20 @@ export class AIClient {
           const randomIndex = Math.floor(Math.random() * 3);
           const weatherTypes = ['Clear', 'Clouds', 'Clouds', 'Rain', 'Snow', 'Thunderstorm'];
           const weatherDescs = ['晴朗', '多云', '阴天', '小雨', '小雪', '雷阵雨'];
-          const weatherType = weatherTypes[randomIndex];
-          const weatherDesc = weatherDescs[randomIndex];
+          const weatherType = weatherTypes[randomIndex] || 'Clear';
+          const weatherDesc = weatherDescs[randomIndex] || '晴朗';
 
           let baseTemp = isWinter ? -5 : 15;
           if (weatherType === 'Rain') baseTemp -= 5;
           if (weatherType === 'Snow') baseTemp -= 8;
 
+          const dateStr = forecastDate.toISOString().split('T')[0];
+          if (!dateStr) {
+            continue;
+          }
+
           forecast.push({
-            date: forecastDate.toISOString().split('T')[0],
+            date: dateStr,
             day: {
               temp_max: baseTemp + Math.floor(Math.random() * 8) + 2,
               temp_min: baseTemp - Math.floor(Math.random() * 5) - 2,
@@ -477,8 +488,13 @@ export class AIClient {
         const forecastDate = new Date(today);
         forecastDate.setDate(today.getDate() + i);
 
+        const dateStr = forecastDate.toISOString().split('T')[0];
+        if (!dateStr) {
+          continue;
+        }
+
         forecast.push({
-          date: forecastDate.toISOString().split('T')[0],
+          date: dateStr,
           day: {
             temp_max: isWinter ? 0 + Math.floor(Math.random() * 5) : 20 + Math.floor(Math.random() * 10),
             temp_min: isWinter ? -8 + Math.floor(Math.random() * 5) : 10 + Math.floor(Math.random() * 5),
@@ -500,25 +516,89 @@ export class AIClient {
     }
   }
 
+  public async uploadVoiceReference(params: {
+    file: File | Blob;
+    model?: string;
+    customVoiceName?: string;
+    text?: string;
+    signal?: AbortSignal;
+  }): Promise<{ uri: string }> {
+    if (!params.file) {
+      throw new Error('请提供音频文件');
+    }
+
+    const controller = params.signal ? null : new AbortController();
+    const timeoutId = controller ? setTimeout(() => controller.abort(), this.timeout) : null;
+    const signal = params.signal ?? controller?.signal;
+
+    const formData = new FormData();
+    formData.append('file', params.file);
+    formData.append('model', params.model || API_CONFIG.DEFAULT_VOICE_MODEL);
+    if (params.customVoiceName) {
+      formData.append('customVoiceName', params.customVoiceName);
+    }
+    if (params.text) {
+      formData.append('text', params.text);
+    }
+
+    try {
+      const response = await fetch(API_CONFIG.VOICE_UPLOAD_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`
+        },
+        body: formData,
+        signal
+      });
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`上传参考音频失败: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
+      if (!result?.uri) {
+        throw new Error('接口未返回音频 URI');
+      }
+      return result;
+    } catch (error) {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      throw error instanceof Error ? error : new Error('上传参考音频失败');
+    }
+  }
+
   public async sendChatRequest(
     messages: ChatMessage[],
     options?: {
       temperature?: number;
       max_tokens?: number;
       top_p?: number;
+      stream?: boolean;
     },
-    signal?: AbortSignal
+    handlers?: {
+      signal?: AbortSignal;
+      onToken?: (token: string) => void;
+    }
   ): Promise<string> {
+    const useStream = options?.stream || typeof handlers?.onToken === 'function';
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-      const request: ChatCompletionRequest = {
+      const request: ChatCompletionRequest & { stream?: boolean } = {
         model: API_CONFIG.DEFAULT_MODEL,
         messages: messages,
         temperature: options?.temperature ?? API_CONFIG.DEFAULT_TEMPERATURE,
         max_tokens: options?.max_tokens ?? API_CONFIG.DEFAULT_MAX_TOKENS,
-        top_p: options?.top_p ?? API_CONFIG.DEFAULT_TOP_P
+        top_p: options?.top_p ?? API_CONFIG.DEFAULT_TOP_P,
+        stream: useStream ? true : undefined
       };
 
       console.log('发送API请求:', JSON.stringify(request, null, 2));
@@ -531,7 +611,7 @@ export class AIClient {
           'Authorization': `Bearer ${this.apiKey}`
         },
         body: JSON.stringify(request),
-        signal: signal || controller.signal
+        signal: handlers?.signal || controller.signal
       });
 
       clearTimeout(timeoutId);
@@ -544,11 +624,78 @@ export class AIClient {
         throw new Error(`API请求失败: ${response.status} ${errorText}`);
       }
 
+      if (useStream) {
+        if (!response.body) {
+          throw new Error('流式响应不可用');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let fullText = '';
+
+        const processLine = (line: string) => {
+          if (!line.startsWith('data:')) return;
+          const data = line.replace('data:', '').trim();
+          if (!data) return;
+          if (data === '[DONE]') {
+            return true;
+          }
+
+          try {
+            const json = JSON.parse(data);
+            const delta = json?.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              fullText += delta;
+              handlers?.onToken?.(delta);
+            }
+          } catch (err) {
+            console.warn('解析流数据失败:', err, data);
+          }
+          return false;
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex;
+          while ((newlineIndex = buffer.indexOf('\n\n')) !== -1) {
+            const chunk = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 2);
+            const lines = chunk.split('\n');
+            for (const line of lines) {
+              const finished = processLine(line.trim());
+              if (finished) {
+                reader.cancel();
+                return fullText;
+              }
+            }
+          }
+        }
+
+        // 处理剩余 buffer
+        if (buffer.length) {
+          const lines = buffer.split('\n');
+          for (const line of lines) {
+            const finished = processLine(line.trim());
+            if (finished) break;
+          }
+        }
+
+        return fullText;
+      }
+
       const data: ChatCompletionResponse = await response.json();
       console.log('API响应:', data);
 
       if (data.choices && data.choices.length > 0) {
-        return data.choices[0].message.content;
+        const firstChoice = data.choices[0];
+        if (!firstChoice) {
+          throw new Error('API返回数据格式错误');
+        }
+        return firstChoice.message.content;
       }
 
       throw new Error('API返回数据格式错误');
