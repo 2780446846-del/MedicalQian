@@ -359,10 +359,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { request } from '@/utils/request.js'
-import { setToken, setUserInfo } from '@/utils/auth.js'
-import { startOneClickLogin } from '@/services/oneclick/oneClickLogin.js'
-import captcha from '@/components/captcha4/index.vue'
+import request from '../../utils/request.js'
+import { setToken, setUserInfo } from '../../utils/auth.js'
+import { startOneClickLogin } from '../../services/oneclick/oneClickLogin.js'
+import captcha from '../../components/captcha4/index.vue'
+import { API_BASE_URL } from '../../utils/config.js'
 
 // 当前登录方式
 const currentTab = ref('account') // 'account' | 'phone'

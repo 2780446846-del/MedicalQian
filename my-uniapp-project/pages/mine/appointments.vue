@@ -428,11 +428,16 @@ export default {
         }
 
         // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建支付订单...',
-          mask: true
-        });
+        try {
+          uni.showLoading({
+            title: '正在创建支付订单...',
+            mask: true
+          });
+          loadingShown = true;
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
 
         // 调用后端支付接口
         // 使用 wap 接口（手机端支付），适配移动端和PC端
@@ -447,15 +452,28 @@ export default {
             showLoading: false // 禁用 api.js 内部的 loading，使用手动控制
           });
         } catch (apiError) {
-          // API调用失败，确保隐藏loading
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
+          // 提取错误信息
+          let errorMsg = apiError?.message || apiError?.data?.message || '创建支付订单失败';
+          
+          // 如果是404错误，提供更友好的提示
+          if (errorMsg.includes('404') || errorMsg.includes('不存在') || errorMsg.includes('Not Found')) {
+            errorMsg = '支付接口不存在，请检查后端服务是否正常运行';
+            console.error('❌ 创建支付订单API调用失败 (404):', apiError);
+            console.error('❌ 请求URL: /pay/alipay/wap');
+            console.error('❌ 请确认后端已实现该接口');
+          } else {
+            console.error('❌ 创建支付订单API调用失败:', apiError);
           }
           
-          // 提取错误信息
-          const errorMsg = apiError?.message || apiError?.data?.message || '创建支付订单失败';
-          console.error('❌ 创建支付订单API调用失败:', apiError);
+          // 先隐藏loading，再显示错误提示
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+              loadingShown = false;
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+          }
           
           uni.showToast({
             title: errorMsg,
@@ -464,11 +482,15 @@ export default {
           });
           return;
         }
-
-        // 确保隐藏loading
+        
+        // API调用成功，隐藏loading
         if (loadingShown) {
-          uni.hideLoading();
-          loadingShown = false;
+          try {
+            uni.hideLoading();
+            loadingShown = false;
+          } catch (hideError) {
+            // 忽略hideLoading错误
+          }
         }
 
         // 检查响应是否成功
@@ -675,11 +697,16 @@ export default {
         }
 
         // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建微信支付订单...',
-          mask: true
-        });
+        try {
+          loadingShown = true;
+          uni.showLoading({
+            title: '正在创建微信支付订单...',
+            mask: true
+          });
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
 
         // 调用后端微信支付接口
         let res;
@@ -693,11 +720,6 @@ export default {
             showLoading: false
           });
         } catch (apiError) {
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-          
           const errorMsg = apiError?.message || apiError?.data?.message || '创建微信支付订单失败';
           console.error('❌ 创建微信支付订单API调用失败:', apiError);
           
@@ -707,12 +729,16 @@ export default {
             duration: 3000
           });
           return;
-        }
-
-        // 隐藏loading
-        if (loadingShown) {
-          uni.hideLoading();
-          loadingShown = false;
+        } finally {
+          // 确保隐藏loading（无论成功还是失败）
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+            loadingShown = false;
+          }
         }
 
         // 检查响应
@@ -857,11 +883,16 @@ export default {
         }
 
         // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建银联支付订单...',
-          mask: true
-        });
+        try {
+          loadingShown = true;
+          uni.showLoading({
+            title: '正在创建银联支付订单...',
+            mask: true
+          });
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
 
         // 调用后端银联支付接口
         // 注意：银联支付返回的是HTML表单，需要特殊处理
@@ -878,12 +909,6 @@ export default {
               body: `预约${item.doctorName}医生 - ${item.date} ${item.time}`
             })
           });
-
-          // 隐藏loading
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
 
           if (!response.ok) {
             throw new Error('创建银联支付订单失败');
@@ -935,11 +960,6 @@ export default {
           });
           // #endif
         } catch (apiError) {
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-          
           const errorMsg = apiError?.message || '创建银联支付订单失败';
           console.error('❌ 创建银联支付订单失败:', apiError);
           
@@ -949,6 +969,16 @@ export default {
             duration: 3000
           });
           return;
+        } finally {
+          // 确保隐藏loading（无论成功还是失败）
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+            loadingShown = false;
+          }
         }
       } catch (error) {
         if (loadingShown) {
@@ -1001,11 +1031,16 @@ export default {
         }
 
         // 显示加载提示
-        loadingShown = true;
-        uni.showLoading({
-          title: '正在创建 Stripe 支付...',
-          mask: true
-        });
+        try {
+          loadingShown = true;
+          uni.showLoading({
+            title: '正在创建 Stripe 支付...',
+            mask: true
+          });
+        } catch (loadingError) {
+          console.warn('⚠️ showLoading 调用失败:', loadingError);
+          loadingShown = false;
+        }
 
         // 调用后端 Stripe 支付接口
         let res;
@@ -1019,11 +1054,6 @@ export default {
             showLoading: false
           });
         } catch (apiError) {
-          if (loadingShown) {
-            uni.hideLoading();
-            loadingShown = false;
-          }
-          
           const errorMsg = apiError?.message || apiError?.data?.message || '创建 Stripe 支付失败';
           console.error('❌ 创建 Stripe 支付API调用失败:', apiError);
           
@@ -1033,12 +1063,16 @@ export default {
             duration: 3000
           });
           return;
-        }
-
-        // 隐藏loading
-        if (loadingShown) {
-          uni.hideLoading();
-          loadingShown = false;
+        } finally {
+          // 确保隐藏loading（无论成功还是失败）
+          if (loadingShown) {
+            try {
+              uni.hideLoading();
+            } catch (hideError) {
+              // 忽略hideLoading错误
+            }
+            loadingShown = false;
+          }
         }
 
         // 检查响应
@@ -1629,7 +1663,7 @@ export default {
   align-items: center;
   padding: 30rpx 20rpx;
   margin-bottom: 20rpx;
-  background-color: var(--bg-color);
+  background-color: var(--bg-color); 
   border-radius: 16rpx;
   border: 2rpx solid transparent;
   cursor: pointer;

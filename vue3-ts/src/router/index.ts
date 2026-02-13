@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useRbacStore } from '../stores/rbac'
-import { checkRoutePermission } from '../utils/permissions'
+
 import type { Permission, Role } from '../stores/rbac'
 import MainLayout from '../layouts/MainLayout.vue'
 import HomeView from '../views/HomeView.vue'
@@ -19,6 +19,7 @@ import ChatView from '../views/ChatView.vue'
 import AnalyticsView from '../views/AnalyticsView.vue'
 import ProfileView from '../views/ProfileView.vue'
 import RBACView from '../views/RBACView.vue'
+import DoctorCertView from '../views/DoctorCertView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -131,6 +132,14 @@ const router = createRouter({
           component: ProfileView,
         },
         {
+          path: 'doctor-cert',
+          name: 'doctor-cert',
+          component: DoctorCertView,
+          meta: {
+            requiresAuth: true,
+          },
+        },
+        {
           path: 'rbac',
           name: 'rbac',
           component: RBACView,
@@ -145,7 +154,7 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   const rbacStore = useRbacStore()
-  
+
   // 导入权限composable
   const { usePermission } = await import('@/composables/usePermission')
   const permissionComposable = usePermission()
@@ -236,25 +245,25 @@ router.beforeEach(async (to, from, next) => {
         // 权限获取失败不阻止页面加载，让页面先显示
       }
     }
-    
+
     const route = to.matched[to.matched.length - 1]
     if (route) {
       // 超级管理员和admin角色可以访问所有页面
-      const userRoleCode = permissionData.value.role?.code || 
+      const userRoleCode = permissionData.value.role?.code ||
                           authStore.userInfo?.roles?.[0]?.code ||
                           (typeof authStore.userInfo?.role === 'string' ? authStore.userInfo.role : authStore.userInfo?.role?.code)
       const isAdmin = userRoleCode === 'admin'
-      
+
       // 检查用户名是否为admin（超级管理员标识）
       const username = authStore.userInfo?.username
       const isSuperAdminByUsername = username && username.toLowerCase() === 'admin'
-      
+
       if (checkIsSuperAdmin.value || isAdmin || isSuperAdminByUsername) {
         // 超级管理员和admin可以访问所有页面，直接通过
         next()
         return
       }
-      
+
       // 检查 requiresPermission（单个权限字符串）
       const requiresPermission = route.meta.requiresPermission as string | undefined
       if (requiresPermission) {
@@ -267,7 +276,7 @@ router.beforeEach(async (to, from, next) => {
           return
         }
       }
-      
+
       // 检查 permissions（权限数组）和 roles（角色数组）
       const requiredPermissions = route.meta.permissions as Permission[] | undefined
       const requiredRoles = route.meta.roles as Role[] | undefined
@@ -275,8 +284,12 @@ router.beforeEach(async (to, from, next) => {
       if (requiredPermissions || requiredRoles) {
         // 检查角色
         if (requiredRoles && requiredRoles.length > 0) {
-          // Role 类型已经是字符串联合类型，直接使用
-          if (!hasRole(requiredRoles)) {
+          const roleCodes = requiredRoles.map(r => {
+            if (typeof r === 'string') return r
+            if (typeof r === 'object' && r !== null && 'code' in r) return (r as { code: string }).code
+            return String(r)
+          })
+          if (!hasRole(roleCodes)) {
             next({
               path: '/',
               query: { error: 'no_permission' },
@@ -284,11 +297,15 @@ router.beforeEach(async (to, from, next) => {
             return
           }
         }
-        
+
         // 检查权限
         if (requiredPermissions && requiredPermissions.length > 0) {
-          // Permission 类型已经是字符串联合类型，直接使用
-          if (!hasPermission(requiredPermissions, 'any')) {
+          const permissionCodes = requiredPermissions.map(p => {
+            if (typeof p === 'string') return p
+            if (typeof p === 'object' && p !== null && 'code' in p) return (p as { code: string }).code
+            return String(p)
+          })
+          if (!hasPermission(permissionCodes, 'any')) {
             next({
               path: '/',
               query: { error: 'no_permission' },

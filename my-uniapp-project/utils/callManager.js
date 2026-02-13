@@ -131,12 +131,44 @@ class CallManager {
   }
 
   /**
+   * 获取 H5 下“无法使用摄像头/麦克风”时的友好说明（微信/非 HTTPS 等）
+   */
+  _getUnsupportedMediaMessage() {
+    const isSecure = typeof window !== 'undefined' && window.isSecureContext
+    const isWeChat = typeof navigator !== 'undefined' && /MicroMessenger/i.test(navigator.userAgent || '')
+    if (!isSecure) {
+      return '当前页面非安全环境（需 HTTPS），无法使用摄像头/麦克风。请使用 HTTPS 打开本页面后再试。'
+    }
+    if (isWeChat) {
+      return '当前浏览器不支持摄像头/麦克风访问。\n\n建议：点击右上角「…」选择「在浏览器中打开」，使用系统浏览器（如 Chrome、Safari）再试。'
+    }
+    return '当前浏览器不支持摄像头/麦克风访问。请使用 Chrome、Edge 或 Safari 的 HTTPS 页面再试。'
+  }
+
+  /**
    * 获取用户媒体流（H5环境）
    */
   async getUserMedia(constraints) {
     // #ifdef H5
+    // 安全上下文检查：非 HTTPS（除 localhost）下浏览器不会暴露摄像头/麦克风
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      const msg = this._getUnsupportedMediaMessage()
+      return Promise.reject(new Error(msg))
+    }
+
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      return await navigator.mediaDevices.getUserMedia(constraints)
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints)
+      } catch (err) {
+        const msg = err && err.message ? err.message : ''
+        if (msg.includes('Permission denied') || msg.includes('权限')) {
+          throw new Error('已拒绝摄像头/麦克风权限，请在浏览器设置中允许后刷新重试。')
+        }
+        if (msg.includes('NotFoundError') || msg.includes('找不到')) {
+          throw new Error('未检测到摄像头或麦克风设备，请检查设备连接。')
+        }
+        throw err
+      }
     }
 
     // 降级到旧版 API
@@ -147,7 +179,7 @@ class CallManager {
         navigator.msGetUserMedia
 
       if (!getUserMedia) {
-        reject(new Error('当前浏览器不支持摄像头/麦克风访问'))
+        reject(new Error(this._getUnsupportedMediaMessage()))
         return
       }
 

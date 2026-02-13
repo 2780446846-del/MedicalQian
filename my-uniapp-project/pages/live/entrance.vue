@@ -111,11 +111,54 @@ const goToLiveList = () => {
   })
 }
 
-// 我要直播 - 跳转到医生直播页面
-const goToStartLive = () => {
-  uni.navigateTo({
-    url: '/pages/doctor/live'
-  })
+// 我要直播 - 仅认证医师可进入
+const goToStartLive = async () => {
+  try {
+    const userInfo = uni.getStorageSync('userInfo') || {}
+    let authStatus = userInfo.authStatus || '未认证'
+
+    // 从服务器获取最新认证状态
+    try {
+      const res: any = await request({
+        url: '/auth/me',
+        method: 'GET',
+        data: {},
+        needAuth: true,
+        showLoading: false,
+        showError: false
+      })
+      if (res?.success && res?.user) {
+        authStatus = res.user.authStatus || '未认证'
+        // 同步到本地缓存
+        userInfo.authStatus = authStatus
+        uni.setStorageSync('userInfo', userInfo)
+      }
+    } catch (e) {
+      // 静默失败，使用缓存值
+    }
+
+    if (authStatus !== '已认证') {
+      uni.showModal({
+        title: '无法开启直播',
+        content: '只有认证医师才能开启直播功能，请先完成医师认证。',
+        confirmText: '去认证',
+        cancelText: '取消',
+        success: (res: any) => {
+          if (res.confirm) {
+            uni.navigateTo({ url: '/pages/mine/doctor-cert' })
+          }
+        }
+      })
+      return
+    }
+
+    uni.navigateTo({
+      url: '/pages/doctor/live'
+    })
+  } catch (error) {
+    console.error('检查认证状态失败:', error)
+    uni.showToast({ title: '网络异常，请重试', icon: 'none' })
+  }
 }
 
 onMounted(() => {
