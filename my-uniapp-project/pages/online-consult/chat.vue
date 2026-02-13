@@ -91,11 +91,17 @@
     <view class="input-area">
       <!-- 第一行：功能按钮 -->
       <view class="input-buttons-row">
-        <view class="call-btn" @click="startVideoCall" title="视频通话">
-          <text class="call-icon">📹</text>
+        <view class="call-btn-wrap" @click="startVideoCall" title="与医生视频通话">
+          <view class="call-btn">
+            <text class="call-icon">📹</text>
+          </view>
+          <text class="call-btn-label">视频通话</text>
         </view>
-        <view class="call-btn" @click="startAudioCall" title="语音通话">
-          <text class="call-icon">📞</text>
+        <view class="call-btn-wrap" @click="startAudioCall" title="与医生语音通话">
+          <view class="call-btn">
+            <text class="call-icon">📞</text>
+          </view>
+          <text class="call-btn-label">语音通话</text>
         </view>
         <view class="image-btn album-btn" @click="chooseImages" title="相册">
           <text class="image-icon">🖼️</text>
@@ -187,42 +193,62 @@
     <!-- 通话界面：与医生端布局和样式保持一致，H5 下使用原生 video/audio 播放 WebRTC 媒体流 -->
     <view v-if="isInCall" class="call-modal">
       <view class="call-content">
-        <!-- 远程视频（视频通话显示整屏画面） -->
-        <video
-          ref="remoteVideoRef"
-          class="remote-video"
-          autoplay
-          playsinline
-        ></video>
+        <!-- 视频通话：远程/本地画面 -->
+        <template v-if="callType === 'video'">
+          <video
+            ref="remoteVideoRef"
+            class="remote-video"
+            autoplay
+            playsinline
+          ></video>
+          <video
+            ref="localVideoRef"
+            class="local-video"
+            autoplay
+            playsinline
+            muted
+          ></video>
+        </template>
+        <!-- 语音通话：不显示视频区域，避免出现「视频播放失败」；仅用 audio 播对方声音 -->
+        <view v-else class="audio-call-view">
+          <view class="audio-call-icon">📞</view>
+          <text class="audio-call-title">语音通话中</text>
+          <text class="audio-call-desc">{{ callStatusText || '与医生正在通话...' }}</text>
+        </view>
         
-        <!-- 本地视频（右上角小窗口） -->
-        <video
-          ref="localVideoRef"
-          class="local-video"
-          autoplay
-          playsinline
-          muted
-        ></video>
-        
-        <!-- 通话控制按钮 -->
+        <!-- 通话控制按钮（静音、挂断等，避免被底部导航遮挡） -->
         <view class="call-controls">
-          <view class="call-control-btn" @click="toggleMute">
-            <text>{{ isMuted ? '🔇' : '🎤' }}</text>
+          <view class="call-control-item" @click="toggleMute">
+            <view class="call-control-btn">
+              <text>{{ isMuted ? '🔇' : '🎤' }}</text>
+            </view>
+            <text class="call-control-label">{{ isMuted ? '取消静音' : '静音' }}</text>
           </view>
-          <view v-if="callType === 'video'" class="call-control-btn" @click="toggleVideo">
-            <text>{{ isVideoEnabled ? '📹' : '📷' }}</text>
-          </view>
-          <view v-if="callType === 'video'" class="call-control-btn" @click="switchCamera">
-            <text>🔄</text>
-          </view>
-          <view class="call-control-btn end-call" @click="endCall">
-            <text>📴</text>
+          <template v-if="callType === 'video'">
+            <view class="call-control-item" @click="toggleVideo">
+              <view class="call-control-btn">
+                <text>{{ isVideoEnabled ? '📹' : '📷' }}</text>
+              </view>
+              <text class="call-control-label">{{ isVideoEnabled ? '关摄像头' : '开摄像头' }}</text>
+            </view>
+            <view class="call-control-item" @click="switchCamera">
+              <view class="call-control-btn">
+                <text>🔄</text>
+              </view>
+              <text class="call-control-label">切换镜头</text>
+            </view>
+          </template>
+          <view class="call-control-item" @click="endCall">
+            <view class="call-control-btn end-call">
+              <text>📴</text>
+            </view>
+            <text class="call-control-label">挂断</text>
           </view>
         </view>
         
-        <!-- 通话状态 -->
+        <!-- 通话状态（视频通话时顶部显示） -->
         <view class="call-status">
-          <text>{{ callStatusText }}</text>
+          <text>{{ callType === 'video' ? callStatusText : '' }}</text>
         </view>
       </view>
     </view>
@@ -2128,7 +2154,12 @@ const startVideoCall = async () => {
     // H5：使用动态创建的原生 video，避免 uni-app Video 导致 currentTime/srcObject 报错
     const { localVideo, remoteVideo } = ensureCallVideoElements()
     if (!localVideo || !remoteVideo) {
-      uni.showToast({ title: '无法创建视频元素', icon: 'none' })
+      uni.showModal({
+        title: '无法使用视频通话',
+        content: '当前环境无法创建视频元素，请使用浏览器打开或检查摄像头/麦克风权限后重试。',
+        showCancel: false,
+        confirmText: '知道了'
+      })
       isInCall.value = false
       return
     }
@@ -2208,8 +2239,14 @@ const startAudioCall = async () => {
     
     // #ifdef H5
     const { localVideo, remoteVideo, remoteAudio } = ensureCallVideoElements()
-    if (!remoteVideo) {
-      uni.showToast({ title: '无法创建媒体元素', icon: 'none' })
+    // 语音通话只需 remoteAudio（界面不渲染 video 元素），无需 remoteVideo
+    if (!remoteAudio) {
+      uni.showModal({
+        title: '无法使用语音通话',
+        content: '当前环境无法创建音频播放元素，请使用浏览器打开或检查权限后重试。',
+        showCancel: false,
+        confirmText: '知道了'
+      })
       isInCall.value = false
       return
     }
@@ -2219,7 +2256,7 @@ const startAudioCall = async () => {
     const remoteVideo = null
     const remoteAudio = null
     // #endif
-    
+
     await callManager.startCall(doctorId.value, 'audio', localVideo, remoteVideo, remoteAudio)
     // 在用户点击“发起语音通话”按钮后，主动尝试播放远程音频一次
     ensureRemoteAudioPlayingOnH5()
@@ -2298,8 +2335,15 @@ const handleIncomingCall = async (data: any) => {
           
           // #ifdef H5
           const { localVideo, remoteVideo, remoteAudio } = ensureCallVideoElements()
-          if (!remoteVideo) {
-            uni.showToast({ title: '无法创建媒体元素', icon: 'none' })
+          // 语音来电只需 remoteAudio，视频来电需要 remoteVideo
+          const needVideo = incomingCallType === 'video'
+          if (needVideo ? !remoteVideo : !remoteAudio) {
+            uni.showModal({
+              title: needVideo ? '无法使用视频通话' : '无法使用语音通话',
+              content: '当前环境无法创建媒体播放元素，请使用浏览器打开或检查权限后重试。',
+              showCancel: false,
+              confirmText: '知道了'
+            })
             isInCall.value = false
             return
           }
@@ -3213,6 +3257,21 @@ const tagList = [
     flex-shrink: 0;
   }
   
+  .call-btn-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4rpx;
+    cursor: pointer;
+    flex-shrink: 0;
+    &:active {
+      opacity: 0.8;
+    }
+  }
+  .call-btn-label {
+    font-size: 20rpx;
+    color: #666;
+  }
   .call-btn {
     width: 60rpx;
     height: 60rpx;
@@ -3641,17 +3700,56 @@ const tagList = [
   z-index: 10;
 }
 
+/* 语音通话专用视图：不显示视频，避免「视频播放失败」 */
+.audio-call-view {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  z-index: 1;
+}
+.audio-call-icon {
+  font-size: 120rpx;
+  margin-bottom: 24rpx;
+}
+.audio-call-title {
+  color: #fff;
+  font-size: 40rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+.audio-call-desc {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 28rpx;
+}
+
+/* 通话控制条：上移，避免被底部导航栏遮挡；带文字标签 */
 .call-controls {
   position: absolute;
-  bottom: 80rpx;
+  bottom: 220rpx;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  gap: 40rpx;
-  align-items: center;
+  gap: 32rpx;
+  align-items: flex-end;
   z-index: 10;
 }
-
+.call-control-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+}
+.call-control-label {
+  color: #fff;
+  font-size: 24rpx;
+}
 .call-control-btn {
   width: 120rpx;
   height: 120rpx;

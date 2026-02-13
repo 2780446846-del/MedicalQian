@@ -1769,11 +1769,11 @@ function cleanupCallManager() {
           >
             <div class="patient-status" :class="{ online: patient.isOnline }"></div>
             <div class="patient-avatar-circle" :style="{ backgroundColor: getAvatarColor(patient.id) }">
-              {{ getPatientInitial(patient.name) }}
+              {{ getPatientInitial(patient.name === '患者' ? '' : patient.name) }}
             </div>
             <div class="patient-info">
               <div class="patient-name-row">
-                <span class="patient-name-text">{{ patient.name }}</span>
+                <span class="patient-name-text">{{ patient.name === '患者' ? '' : patient.name }}</span>
               </div>
               <div v-if="patient.lastMessage" class="patient-last-message">
                 {{ patient.lastMessage }}
@@ -1791,9 +1791,9 @@ function cleanupCallManager() {
       <!-- 聊天头部 -->
       <div class="chat-header">
         <div class="chat-header-left">
-          <div class="patient-avatar-header">{{ getPatientInitial(patientInfo.name) }}</div>
+          <div class="patient-avatar-header">{{ getPatientInitial(patientInfo.name === '患者' ? '' : patientInfo.name) }}</div>
           <div class="chat-header-info">
-            <div class="chat-header-name">{{ patientInfo.name }}</div>
+            <div class="chat-header-name">{{ patientInfo.name === '患者' ? '' : patientInfo.name }}</div>
             <div class="chat-header-status">
               <span class="status-dot" :class="{ online: selectedPatientOnlineStatus }"></span>
               <span>{{ selectedPatientOnlineStatus ? '在线' : '离线' }}</span>
