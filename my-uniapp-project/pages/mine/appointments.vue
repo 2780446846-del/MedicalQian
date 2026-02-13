@@ -63,42 +63,12 @@
           <view class="patient-info">
             <text class="patient-text">就诊人:{{ item.patientName }} {{ item.date }} {{ item.time }}</text>
           </view>
-          <view class="price-info" @click.stop="showPaymentOptions(item)">
+          <view class="price-info">
             <text class="price-text">¥{{ item.price }}</text>
           </view>
         </view>
       </view>
     </scroll-view>
-
-    <!-- 支付方式选择弹窗 -->
-    <view v-if="showPaymentModal" class="payment-modal" @click="closePaymentModal">
-      <view class="payment-modal-content" @click.stop>
-        <view class="payment-modal-header">
-          <text class="payment-modal-title">选择支付方式</text>
-          <view class="payment-modal-close" @click="closePaymentModal">✕</view>
-        </view>
-        <view class="payment-amount">
-          <text class="payment-amount-label">支付金额</text>
-          <text class="payment-amount-value">¥{{ selectedItem?.price || 0 }}</text>
-        </view>
-        <view class="payment-methods">
-          <view class="payment-method-item" @click="selectPaymentMethod('alipay')">
-            <view class="payment-method-icon alipay-icon">💙</view>
-            <view class="payment-method-info">
-              <text class="payment-method-name">支付宝支付</text>
-              <text class="payment-method-desc">推荐使用，安全快捷</text>
-            </view>
-            <view class="payment-method-radio" :class="{ active: paymentMethod === 'alipay' }">
-              <view v-if="paymentMethod === 'alipay'" class="payment-method-radio-dot"></view>
-            </view>
-          </view>
-        </view>
-        <view class="payment-modal-footer">
-          <button class="payment-cancel-btn" @click="closePaymentModal">取消</button>
-          <button class="payment-confirm-btn" @click="confirmPayment">确认支付</button>
-        </view>
-      </view>
-    </view>
 
     <!-- 主题切换按钮 -->
     <ThemeToggle />
@@ -123,15 +93,13 @@ export default {
       theme: getCurrentTheme(),
       tabs: [
         { key: 'all', label: '全部' },
+        { key: 'pendingPayment', label: '待支付' },
         { key: 'pendingVisit', label: '待就诊' },
         { key: 'pendingRate', label: '待评价' },
         { key: 'rated', label: '已评价' },
         { key: 'history', label: '历史' }
       ],
       appointmentList: [],
-      showPaymentModal: false,
-      selectedItem: null,
-      paymentMethod: 'alipay' // 默认选择支付宝
     };
   },
   computed: {
@@ -143,27 +111,6 @@ export default {
   onLoad(query) {
     if (query && query.type) {
       this.activeTab = query.type;
-    }
-    // 支付完成后回跳时，显示提示并跳转到首页
-    if (query && (query.status === 'success' || query.from === 'alipay')) {
-      uni.showToast({
-        title: '支付成功',
-        icon: 'success',
-        duration: 2000,
-      });
-      
-      // 2秒后自动跳转到首页
-      setTimeout(() => {
-        uni.switchTab({
-          url: '/pages/index/index',
-          success: () => {
-            console.log('✅ 支付成功，已跳转到首页');
-          },
-          fail: (err) => {
-            console.error('❌ 跳转首页失败:', err);
-          }
-        });
-      }, 2000);
     }
     // 加载预约数据
     this.loadAppointments();
@@ -221,53 +168,61 @@ export default {
       this.filterAppointments();
     },
     async loadAppointments() {
-      console.log('🔍 开始加载预约数据，当前标签:', this.activeTab);
+      console.log('🔍 加载预约数据，标签:', this.activeTab);
       
-      // 先尝试从本地存储读取（用于调试和快速显示）
+      // 优先从后端API获取
       try {
-        const localAppointments = getAppointmentsByStatus(this.activeTab);
-        console.log('📦 本地存储数据:', {
-          activeTab: this.activeTab,
-          localCount: localAppointments ? localAppointments.length : 0,
-          localData: localAppointments
-        });
+        const { get } = require('@/utils/api.js');
+        const statusParam = this.activeTab === 'all' ? '' : `?status=${this.activeTab}`;
+        const res = await get(`/appointment${statusParam}`);
         
-        // 如果本地有数据，直接使用
-        if (localAppointments && Array.isArray(localAppointments) && localAppointments.length > 0) {
-          console.log('✅ 使用本地存储数据，数量:', localAppointments.length);
-          this.appointmentList = localAppointments.map(item => {
-            let formattedDate = item.date;
-            if (formattedDate && formattedDate.includes('年')) {
-              const dateMatch = formattedDate.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-              if (dateMatch) {
-                const year = dateMatch[1];
-                const month = dateMatch[2].padStart(2, '0');
-                const day = dateMatch[3].padStart(2, '0');
-                formattedDate = `${year}-${month}-${day}`;
-              }
-            }
+        if (res && res.success && Array.isArray(res.data)) {
+          console.log('✅ 后端API返回预约数据:', res.data.length);
+          this.appointmentList = res.data.map(item => {
             return {
-              ...item,
-              id: item.id || item._id,
-              date: formattedDate,
-              avatar: item.avatar || item.doctorAvatar || 'https://dummyimage.com/120x120/4a90e2/ffffff&text=医生',
-              expertise: item.expertise || item.doctorExpertise || '专业领域',
-              price: item.price || 0,
-              doctorName: item.doctorName || item.name || '医生',
+              id: item._id || item.id,
+              doctorName: item.doctorName || '医生',
+              title: item.appointmentType || '专家门诊',
               hospital: item.hospital || '',
-              specialty: item.specialty || item.dept || '',
-              title: item.title || ''
+              specialty: item.department || '',
+              expertise: item.doctorExpertise || '专业领域',
+              avatar: item.doctorAvatar || 'https://dummyimage.com/120x120/4a90e2/ffffff&text=医生',
+              patientName: item.patientName || '',
+              date: item.date || '',
+              time: item.time || '',
+              price: item.price || 0,
+              status: item.status || 'pendingPayment',
+              paymentStatus: item.paymentStatus || 'unpaid',
+              outTradeNo: item.outTradeNo || ''
             };
           });
-          console.log('📋 最终显示的预约列表（本地）:', this.appointmentList);
           return;
         }
       } catch (e) {
-        console.error('读取本地存储失败:', e);
+        console.warn('后端API加载失败，尝试本地存储:', e);
       }
       
-      // 如果本地没有数据，显示空状态
-      console.log('❌ 本地存储没有数据');
+      // 后端失败时回退到本地存储
+      try {
+        const localAppointments = getAppointmentsByStatus(this.activeTab);
+        if (localAppointments && localAppointments.length > 0) {
+          this.appointmentList = localAppointments.map(item => ({
+            ...item,
+            id: item.id || item._id,
+            avatar: item.avatar || item.doctorAvatar || 'https://dummyimage.com/120x120/4a90e2/ffffff&text=医生',
+            expertise: item.expertise || item.doctorExpertise || '专业领域',
+            price: item.price || 0,
+            doctorName: item.doctorName || '医生',
+            hospital: item.hospital || '',
+            specialty: item.specialty || item.dept || '',
+            title: item.title || ''
+          }));
+          return;
+        }
+      } catch (e) {
+        console.error('本地存储读取失败:', e);
+      }
+      
       this.appointmentList = [];
     },
     filterAppointments() {
@@ -277,9 +232,11 @@ export default {
     getStatusText(status) {
       const statusMap = {
         pendingVisit: '待就诊',
+        pendingPayment: '待支付',
         pendingRate: '待评价',
         rated: '已评价',
-        history: '历史'
+        history: '历史',
+        cancelled: '已取消'
       };
       return statusMap[status] || '未知';
     },
@@ -1441,6 +1398,16 @@ export default {
     padding: 6rpx 16rpx;
     border-radius: 8rpx;
     
+    &.status-pendingPayment {
+      background-color: rgba(244, 67, 54, 0.15);
+      
+      .status-text {
+        color: #f44336;
+        font-size: 24rpx;
+        font-weight: 500;
+      }
+    }
+    
     &.status-pendingVisit {
       background-color: rgba(30, 115, 232, 0.15);
       
@@ -1540,19 +1507,30 @@ export default {
     
     .price-info {
       padding: 10rpx 20rpx;
-      background-color: #ff9800;
+      background-color: rgba(158,158,158,0.12);
       border-radius: 8rpx;
+      
+      .price-text {
+        font-size: 28rpx;
+        font-weight: 600;
+        color: #666;
+      }
+    }
+    
+    .pay-btn {
+      padding: 12rpx 28rpx;
+      background: linear-gradient(135deg, #ff9800, #f57c00);
+      border-radius: 30rpx;
       cursor: pointer;
       transition: all 0.3s ease;
       
-      /* 点击反馈效果 */
       &:active {
         opacity: 0.7;
         transform: scale(0.95);
       }
       
-      .price-text {
-        font-size: 32rpx;
+      .pay-btn-text {
+        font-size: 28rpx;
         font-weight: 700;
         color: #ffffff;
       }

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { getDashboardOverview, getAppointmentTrend, getRecentAppointments } from '../api/dashboard'
 import * as echarts from 'echarts'
 // @ts-ignore
 import { use } from 'echarts/core'
@@ -191,8 +192,44 @@ let ambulancesChart: echarts.ECharts | null = null
 let roomsChart: echarts.ECharts | null = null
 let genderChart: echarts.ECharts | null = null
 
+// 加载仪表盘真实数据
+const loadDashboardData = async () => {
+  try {
+    const [overviewRes, trendRes, recentRes] = await Promise.all([
+      getDashboardOverview().catch(() => null),
+      getAppointmentTrend(7).catch(() => null),
+      getRecentAppointments(5).catch(() => null),
+    ])
+    if (overviewRes?.success && overviewRes.data) {
+      const d = overviewRes.data
+      totalPatients.value = { value: d.totalPatients || 0, change: d.patientGrowth || 0, changeType: d.patientGrowth >= 0 ? 'increase' : 'decrease' }
+      totalAppointments.value = { value: d.totalAppointments || 0, change: d.appointmentGrowth || 0, changeType: d.appointmentGrowth >= 0 ? 'increase' : 'decrease' }
+      staffStats.value = { nurses: 0, doctors: d.totalStaff || 0 }
+      patientStats.value.inTreatment = d.todayAppointments || 0
+      patientStats.value.recovered = d.totalConsultations || 0
+    }
+    if (trendRes?.success && Array.isArray(trendRes.data)) {
+      patientStats.value.monthlyData = trendRes.data.map((item: { count: number }) => item.count)
+    }
+    if (recentRes?.success && Array.isArray(recentRes.data) && recentRes.data.length > 0) {
+      appointments.value = recentRes.data.slice(0, 5).map((a: { _id: string; doctorName?: string; userId?: string; time?: string; date?: string }, i: number) => ({
+        id: i + 1,
+        name: a.doctorName || a.userId || '患者',
+        gender: i % 2 === 0 ? 'female' as const : 'male' as const,
+        time: a.time || a.date || '',
+        reason: '预约就诊',
+        avatar: i % 2 === 0 ? '👩' : '👨',
+      }))
+    }
+  } catch (e) {
+    console.warn('仪表盘数据加载失败，使用默认数据', e)
+  }
+}
+
 // 初始化
 onMounted(() => {
+  // 加载真实数据
+  loadDashboardData()
   // 初始化图表
   nextTick(() => {
     initCharts()
@@ -214,11 +251,11 @@ const initCharts = () => {
   requestAnimationFrame(() => {
   initPatientChart()
   initTotalPatientsChart()
-    
+
     requestAnimationFrame(() => {
   initAppointmentsChart()
   initAmbulancesChart()
-      
+
       requestAnimationFrame(() => {
   initRoomsChart()
   initGenderChart()
@@ -426,7 +463,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   window.removeEventListener('resize', handleResize)
-  
+
   // 清理防抖定时器
   if (resizeTimer) {
     clearTimeout(resizeTimer)
@@ -493,7 +530,7 @@ const satisfactionGaugeOption = computed(() => {
   // 使用可选链和默认值避免对象可能为“未定义”的错误
   const satisfactionValue = satisfactionScore.value || 0
   const industryValue = industryAverage.value || 0
-  
+
   return {
     series: [
       {
@@ -602,7 +639,7 @@ const satisfactionGaugeOption = computed(() => {
 // 联系人增长曲线图配置
 const contactsLineOption = computed(() => {
   const isDarkMode = isDark.value
-  
+
   return {
     tooltip: {
       trigger: 'axis',

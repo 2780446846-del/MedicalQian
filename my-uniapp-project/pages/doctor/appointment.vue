@@ -111,29 +111,16 @@
             maxlength="11"
           />
         </view>
-        <view class="verify-row">
-          <input
-            class="verify-input"
-            type="text"
-            v-model="verifyCode"
-            placeholder="验证码"
-            placeholder-class="input-placeholder"
-            maxlength="6"
-          />
-          <button
-            class="send-code-btn"
-            :disabled="codeCountdown > 0 || !phoneNumber"
-            @click="sendVerifyCode"
-          >
-            {{ codeCountdown > 0 ? `${codeCountdown}秒后重试` : '发送验证码' }}
-          </button>
-        </view>
       </view>
     </scroll-view>
 
     <!-- 立即预约按钮 -->
     <view class="bottom-bar">
-      <button class="book-btn" @click="submitAppointment">立即预约</button>
+      <view class="bottom-price">
+        <text class="price-label">医事服务费</text>
+        <text class="price-amount">¥{{ appointmentInfo.fee }}</text>
+      </view>
+      <button class="book-btn" @click="submitAppointment">立即预约并支付</button>
     </view>
 
     <!-- 右下角悬浮按钮 -->
@@ -401,102 +388,86 @@ export default {
         });
       }
     },
-    submitAppointment() {
+    async submitAppointment() {
       // 验证必填项
       if (!this.selectedPatient.name) {
-        uni.showToast({
-          title: '请选择就诊人',
-          icon: 'none'
-        });
+        uni.showToast({ title: '请选择就诊人', icon: 'none' });
         return;
       }
-      
-      // 验证手机号
       if (!this.phoneNumber) {
-        uni.showToast({
-          title: '请输入手机号',
-          icon: 'none'
-        });
+        uni.showToast({ title: '请输入手机号', icon: 'none' });
         return;
       }
-      
       const phoneReg = /^1[3-9]\d{9}$/;
       if (!phoneReg.test(this.phoneNumber)) {
-        uni.showToast({
-          title: '请输入正确的手机号',
-          icon: 'none'
-        });
+        uni.showToast({ title: '请输入正确的手机号', icon: 'none' });
         return;
       }
-      
       if (this.hasInsurance && !this.insuranceCardNumber) {
-        uni.showToast({
-          title: '请输入医保卡号',
-          icon: 'none'
-        });
+        uni.showToast({ title: '请输入医保卡号', icon: 'none' });
         return;
       }
-      
-      // 验证验证码格式
-      if (!this.verifyCode) {
-        uni.showToast({
-          title: '请输入验证码',
-          icon: 'none'
-        });
-        return;
-      }
-      
-      if (this.verifyCode.length !== 6) {
-        uni.showToast({
-          title: '验证码为6位数字',
-          icon: 'none'
-        });
-        return;
-      }
-      
-      // 构建预约数据
-      const appointmentData = {
-        doctorName: this.doctorInfo.name || '王医生',
-        title: this.doctorInfo.level || '主任医师',
-        hospital: this.appointmentInfo.hospital || '北京协和医院',
-        dept: this.appointmentInfo.dept || '神经内科',
-        specialty: this.appointmentInfo.dept || '神经内科',
-        expertise: this.doctorInfo.goodAt || '专业领域',
-        avatar: this.doctorInfo.avatar || 'https://randomuser.me/api/portraits/men/3.jpg',
-        patientName: this.selectedPatient.name,
-        patientGender: this.selectedPatient.gender,
-        patientAge: this.selectedPatient.age,
-        patientPhone: this.phoneNumber,
-        date: this.appointmentInfo.date,
-        time: this.appointmentInfo.time,
-        type: this.appointmentInfo.type || '专家门诊',
-        price: this.appointmentInfo.fee || 318,
-        status: 'pendingVisit', // 默认状态为待就诊
-        hasInsurance: this.hasInsurance,
-        insuranceCardNumber: this.insuranceCardNumber || '',
-        verifyCode: this.verifyCode
-      };
-      
+
       try {
-        // 保存预约数据
-        const appointmentId = saveAppointment(appointmentData);
-        console.log('预约已保存，ID:', appointmentId);
-        
-        // 提交预约成功
-        uni.showToast({
-          title: '预约成功',
-          icon: 'success'
+        uni.showLoading({ title: '正在创建预约...' });
+
+        // 1. 调用后端API创建预约（状态为 pendingPayment）
+        const appointmentData = {
+          doctorName: this.doctorInfo.name || '王医生',
+          doctorId: this.doctorInfo.id || this.doctorInfo._id || `doc_${Date.now()}`,
+          doctorAvatar: this.doctorInfo.avatar || '',
+          doctorExpertise: this.doctorInfo.goodAt || this.doctorInfo.expertise || '专业领域',
+          hospital: this.appointmentInfo.hospital || '北京协和医院',
+          department: this.appointmentInfo.dept || '神经内科',
+          appointmentType: this.appointmentInfo.type || '专家门诊',
+          patientName: this.selectedPatient.name,
+          patientGender: this.selectedPatient.gender,
+          patientAge: this.selectedPatient.age,
+          patientPhone: this.phoneNumber,
+          hasInsurance: this.hasInsurance,
+          insuranceCardNumber: this.insuranceCardNumber || '',
+          date: this.appointmentInfo.date,
+          time: this.appointmentInfo.time,
+          price: this.appointmentInfo.fee || 318,
+          status: 'pendingPayment'
+        };
+
+        const createRes = await request({
+          url: '/appointment',
+          method: 'POST',
+          data: appointmentData,
+          showLoading: false,
+          showError: false
         });
-        
-        // 延迟跳转
+
+        if (!createRes || !createRes.success) {
+          throw new Error(createRes?.message || '创建预约失败');
+        }
+
+        const appointment = createRes.data;
+        const appointmentId = appointment._id || appointment.id;
+        console.log('✅ 预约已创建，ID:', appointmentId);
+
+        // 同时保存到本地存储（离线可查看）
+        saveAppointment({
+          ...appointmentData,
+          id: appointmentId,
+          status: 'pendingVisit'
+        });
+
+        uni.hideLoading();
+        uni.showToast({ title: '预约成功', icon: 'success' });
         setTimeout(() => {
-          uni.navigateBack();
+          uni.redirectTo({ url: '/pages/mine/appointments?type=pendingVisit' });
         }, 1500);
+
       } catch (error) {
-        console.error('保存预约失败:', error);
+        uni.hideLoading();
+        console.error('❌ 预约失败:', error);
         uni.showToast({
-          title: '预约失败，请重试',
-          icon: 'none'
+          title: error.message || '预约失败，请重试',
+          icon: 'none',
+          duration: 3000
         });
       }
     },
@@ -874,16 +845,35 @@ export default {
   left: 0;
   right: 0;
   padding: 20rpx 24rpx;
-  padding-left: 24rpx;
-  padding-right: 24rpx;
   padding-bottom: calc(20rpx + env(safe-area-inset-bottom));
   background-color: #ffffff;
   border-top: 1rpx solid #f0f0f0;
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.bottom-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 160rpx;
+}
+
+.price-label {
+  font-size: 24rpx;
+  color: #999;
+}
+
+.price-amount {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: #ff4d4f;
 }
 
 .book-btn {
-  width: 100%;
+  flex: 1;
   height: 88rpx;
   line-height: 88rpx;
   background-color: #2979ff;

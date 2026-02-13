@@ -30,7 +30,12 @@
         <view class="section-title text-[28rpx] font-bold">我的预约</view>
         <view class="section-link text-[22rpx]" @click="goAppointments('all')">查看全部</view>
       </view>
-      <view class="status-grid grid grid-cols-4 gap-[6rpx]">
+      <view class="status-grid grid grid-cols-5 gap-[6rpx]">
+        <view class="status-item flex flex-col items-center relative py-[16rpx]" @click="goAppointments('pendingPayment')">
+          <view v-if="pendingPaymentCount > 0" class="badge absolute top-[4rpx] left-[38rpx] min-w-[26rpx] h-[26rpx] px-[8rpx] rounded-full bg-[#e74c3c] text-white text-[18rpx] leading-[26rpx] text-center">{{ pendingPaymentCount > 99 ? '99+' : pendingPaymentCount }}</view>
+          <uni-icons type="wallet" size="30" :color="theme.primaryColor"></uni-icons>
+          <view class="status-text text-[22rpx] mt-[6rpx]">待支付</view>
+        </view>
         <view class="status-item flex flex-col items-center relative py-[16rpx]" @click="goAppointments('pendingVisit')">
           <view v-if="pendingVisitCount > 0" class="badge absolute top-[4rpx] left-[38rpx] min-w-[26rpx] h-[26rpx] px-[8rpx] rounded-full bg-[#e74c3c] text-white text-[18rpx] leading-[26rpx] text-center">{{ pendingVisitCount > 99 ? '99+' : pendingVisitCount }}</view>
           <uni-icons type="plusempty" size="30" :color="theme.primaryColor"></uni-icons>
@@ -119,6 +124,7 @@ export default {
       username: '',
       phone: '158****1234',
       theme: getCurrentTheme(),
+      pendingPaymentCount: 0,
       pendingVisitCount: 0,
       authStatus: '未认证'
     };
@@ -258,11 +264,22 @@ export default {
         this.theme = getCurrentTheme();
       }
     },
-    updatePendingVisitCount() {
+    async updatePendingVisitCount() {
+      // 优先从后端API获取预约数量
+      try {
+        const res = await get('/appointment');
+        if (res && res.success && Array.isArray(res.data)) {
+          this.pendingPaymentCount = res.data.filter(a => a.status === 'pendingPayment').length;
+          this.pendingVisitCount = res.data.filter(a => a.status === 'pendingVisit').length;
+          return;
+        }
+      } catch (e) {
+        console.warn('后端API获取预约数量失败:', e);
+      }
+      // 回退本地存储
       try {
         this.pendingVisitCount = getPendingVisitCount();
       } catch (error) {
-        console.error('获取待就诊数量失败:', error);
         this.pendingVisitCount = 0;
       }
     }
@@ -271,232 +288,37 @@ export default {
 </script>
 
 <style lang="scss">
-.mine-page {
-  min-height: 100vh;
-  background-color: var(--bg-color);
-  padding-bottom: 60rpx;
-  transition: background-color 0.3s ease;
-}
+.mine-page { min-height: 100vh; background: #f7f8fa; padding-bottom: 60rpx; }
 
-.header {
-  background: linear-gradient(180deg, #4a90e2 0%, #287adf 100%);
-  padding: 32rpx 28rpx 32rpx;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  box-shadow: none;
-}
+.header { background: linear-gradient(135deg, #4a90e2, #667eea); padding: 32rpx 24rpx; }
+.user-row { display: flex; align-items: center; justify-content: space-between; }
+.avatar { width: 80rpx; height: 80rpx; border-radius: 50%; background: #fff; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.avatar-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.user-info { flex: 1; margin-left: 20rpx; color: #fff; }
+.phone { font-size: 30rpx; font-weight: 700; }
+.role-tag { margin-top: 4rpx; display: inline-block; padding: 4rpx 12rpx; border-radius: 20rpx; background: rgba(255,255,255,0.2); font-size: 20rpx; }
+.actions { display: flex; gap: 16rpx; }
+.action-icon { display: flex; align-items: center; justify-content: center; }
 
-.user-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
+.vip-card { margin-top: 16rpx; background: linear-gradient(90deg, #f8d06b, #dcb14a); border-radius: 10rpx; padding: 16rpx 18rpx; display: flex; align-items: center; justify-content: space-between; }
+.vip-left { color: #5a3b05; }
+.vip-title { font-weight: 700; font-size: 24rpx; }
+.vip-sub { margin-top: 4rpx; font-size: 20rpx; }
+.vip-btn { padding: 10rpx 20rpx; background: #0070c0; color: #fff; border-radius: 14rpx; font-size: 22rpx; }
 
-.avatar {
-  width: 84rpx;
-  height: 84rpx;
-  border-radius: 50%;
-  background: #fff;
-  color: #4a90e2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26rpx;
-  font-weight: 600;
-  overflow: hidden;
-}
+.section { background: #fff; margin: 12rpx 16rpx; border-radius: 10rpx; padding: 16rpx 14rpx 10rpx; }
+.section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8rpx; padding: 0 4rpx; }
+.section-title { font-size: 28rpx; font-weight: 700; color: #333; }
+.section-link { font-size: 22rpx; color: #999; }
 
-.avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
+.status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4rpx; }
+.status-item { padding: 14rpx 0 10rpx; position: relative; display: flex; flex-direction: column; align-items: center; }
+.status-item uni-icons { margin-bottom: 6rpx; }
+.badge { position: absolute; top: 4rpx; left: 38rpx; min-width: 24rpx; height: 24rpx; padding: 0 6rpx; border-radius: 999rpx; background: #e74c3c; color: #fff; font-size: 16rpx; text-align: center; line-height: 24rpx; }
+.status-text { font-size: 22rpx; color: #888; margin-top: 4rpx; }
 
-.user-info {
-  flex: 1;
-  margin-left: 20rpx;
-  color: #fff;
-}
-
-.phone {
-  font-size: 32rpx;
-  font-weight: 700;
-}
-
-.role-tag {
-  margin-top: 6rpx;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 6rpx 14rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.2);
-  font-size: 22rpx;
-}
-
-.actions {
-  display: flex;
-  gap: 18rpx;
-}
-
-.action-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.vip-card {
-  margin-top: 20rpx;
-  background: linear-gradient(90deg, #f8d06b 0%, #dcb14a 100%);
-  border-radius: 12rpx;
-  padding: 18rpx 20rpx;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  box-shadow: 0 8rpx 18rpx rgba(0, 0, 0, 0.08);
-}
-
-.vip-left {
-  color: #5a3b05;
-}
-
-.vip-title {
-  font-weight: 700;
-  font-size: 26rpx;
-}
-
-.vip-sub {
-  margin-top: 6rpx;
-  font-size: 20rpx;
-}
-
-.vip-btn {
-  padding: 12rpx 24rpx;
-  background: #0070c0;
-  color: #fff;
-  border-radius: 16rpx;
-  font-size: 22rpx;
-  box-shadow: 0 6rpx 12rpx rgba(0, 0, 0, 0.1);
-}
-
-.section {
-  background-color: var(--card-bg);
-  margin: 12rpx 16rpx 12rpx;
-  border-radius: 8rpx;
-  padding: 18rpx 14rpx 10rpx;
-  box-shadow: 0 6rpx 14rpx var(--shadow-color);
-  transition: background-color 0.3s ease, box-shadow 0.3s ease;
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10rpx;
-  padding: 0 4rpx;
-}
-
-.section-title {
-  font-size: 28rpx;
-  font-weight: 700;
-  color: var(--text-color);
-  transition: color 0.3s ease;
-}
-
-.section-link {
-  font-size: 22rpx;
-  color: var(--text-color-secondary);
-  transition: color 0.3s ease;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6rpx;
-}
-
-.status-item {
-  background: transparent;
-  border-radius: 0;
-  padding: 16rpx 0 12rpx;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.status-item uni-icons {
-  margin-bottom: 8rpx;
-}
-
-.badge {
-  position: absolute;
-  top: 4rpx;
-  left: 38rpx;
-  min-width: 26rpx;
-  height: 26rpx;
-  padding: 0 8rpx;
-  border-radius: 999rpx;
-  background: #e74c3c;
-  color: #fff;
-  font-size: 18rpx;
-  text-align: center;
-  line-height: 26rpx;
-}
-
-.status-text {
-  font-size: 22rpx;
-  color: var(--text-color-secondary);
-  margin-top: 6rpx;
-  transition: color 0.3s ease;
-}
-
-.list-card {
-  background-color: var(--card-bg);
-  margin: 0 16rpx 10rpx;
-  border-radius: 10rpx;
-  box-shadow: 0 6rpx 14rpx var(--shadow-color);
-  transition: background-color 0.3s ease, box-shadow 0.3s ease;
-}
-
-.list-item {
-  padding: 18rpx 16rpx;
-  border-bottom: 1rpx solid var(--border-color);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  transition: border-color 0.3s ease;
-}
-
-.list-item:last-child {
-  border-bottom: none;
-}
-
-.left {
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
-  color: var(--text-color);
-  font-size: 26rpx;
-  transition: color 0.3s ease;
-}
-
-.floating-btn {
-  position: fixed;
-  right: 30rpx;
-  bottom: 160rpx;
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  background: #fff7e6;
-  box-shadow: 0 10rpx 20rpx rgba(0, 0, 0, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sun {
-  font-size: 44rpx;
-}
+.list-card { background: #fff; margin: 0 16rpx 10rpx; border-radius: 10rpx; }
+.list-item { padding: 16rpx; border-bottom: 1rpx solid #f0f0f0; display: flex; align-items: center; justify-content: space-between; }
+.list-item:last-child { border-bottom: none; }
+.left { display: flex; align-items: center; gap: 12rpx; color: #333; font-size: 26rpx; }
 </style>
